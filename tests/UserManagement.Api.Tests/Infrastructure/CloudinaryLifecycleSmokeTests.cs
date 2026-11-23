@@ -9,11 +9,18 @@ namespace UserManagement.Api.Tests.Infrastructure;
 
 /// <summary>
 /// End-to-end smoke test of the whole Cloudinary asset lifecycle against the real
-/// account: upload (tmp folder) -> move (promote to permanent folder) -> download
-/// -> delete. Skipped automatically when no credentials are configured.
+/// account: upload (tmp folder) -> download -> move (promote to permanent folder)
+/// -> download -> delete. Skipped automatically when no credentials are configured.
 /// </summary>
 public class CloudinaryLifecycleSmokeTests
 {
+    /// <summary>
+    /// Cloudinary's CDN invalidation is asynchronous: the API answers "ok" for a
+    /// destroy/rename while the edge may still serve the cached image for a few
+    /// seconds. The test therefore polls instead of asserting instantly.
+    /// </summary>
+    private static readonly TimeSpan InvalidationTimeout = TimeSpan.FromSeconds(60);
+
     private readonly ITestOutputHelper _output;
 
     public CloudinaryLifecycleSmokeTests(ITestOutputHelper output) => _output = output;
@@ -78,16 +85,33 @@ public class CloudinaryLifecycleSmokeTests
         _output.WriteLine($"5. Downloaded -> {movedDownload.Length} bytes");
 
         // 6. The temporary source must be gone after the move.
-        var afterMove = await storage.DownloadAsync(tempPublicId, default);
-        afterMove.Should().BeNull();
+        await WaitUntilGoneAsync(storage, tempPublicId, "temporary source after move");
+        _output.WriteLine("6. Temporary source is gone");
 
         // 7. Delete it again.
         var failed = await storage.DeleteAsync([moved.PublicId], default);
-        _output.WriteLine($"6. Deleted   -> failed: {failed.Count}");
+        _output.WriteLine($"7. Deleted   -> failed: {failed.Count}");
         failed.Should().BeEmpty();
 
         // 8. The asset must be gone now.
-        var afterDelete = await storage.DownloadAsync(moved.PublicId, default);
-        afterDelete.Should().BeNull();
+        await WaitUntilGoneAsync(storage, moved.PublicId, "asset after delete");
+        _output.WriteLine("8. Asset is gone");
+    }
+
+    private async Task WaitUntilGoneAsync(CloudinaryStorage storage, string publicId, string what)
+    {
+        var deadline = DateTime.UtcNow + InvalidationTimeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (await storage.DownloadAsync(publicId, default) is null)
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(3));
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"The {what} ({publicId}) was still being served after {InvalidationTimeout.TotalSeconds:F0}s.");
     }
 }

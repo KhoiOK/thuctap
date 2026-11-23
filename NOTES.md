@@ -657,4 +657,74 @@ Trước đây lỗi chỉ hiện `401` — không biết nguyên nhân. Nay:
 thuộc đúng product environment của `api_key` đang dùng. Cloudinary **không** cho
 suy ra cloud name từ api_key — phải tra cứu thủ công.
 
+---
+
+## Phase 8.7 – Cloudinary thật: cloud name đúng + delivery URL có chữ ký
+
+Sau khi có `CLOUDINARY_URL` đúng (`cloudinary://...@smbl2hal`), upload đã thành
+công — nhưng phát sinh 3 vấn đề mới, **đều do code**, không phải do cấu hình.
+
+### Lỗi 5 — `cloud_name` sai (nặng)
+
+`appsettings.Development.local.json` đang để `CloudName: "cccd"` → Cloudinary trả
+`401` + `Invalid cloud_name cccd`. Đã sửa thành `smbl2hal`.
+
+### Lỗi 6 — Ảnh upload vẫn đọc được công khai (nặng)
+
+Code cũ upload vào `image/upload` với `type=upload` → ảnh **public**, ai có URL
+cũng xem được. Để ẩn ảnh PII phải dùng **`type=authenticated`**.
+
+Bằng chứng thực nghiệm trên cloud `smbl2hal`:
+
+| Cách upload | Response | `image/upload/{pid}` | `image/authenticated/{pid}` |
+|---|---|---|---|
+| `type=upload` | `access_mode: public` | **200** | 401 |
+| `access_mode=authenticated` | `access_mode: public` | **200** | 401 |
+| `type=authenticated` | `type: authenticated` | **404** | 401 (thiếu chữ ký) |
+
+→ `access_mode` bị API **bỏ qua**; chỉ `type=authenticated` mới có tác dụng.
+
+### Lỗi 7 — URL delivery thiếu chữ ký (nặng)
+
+`BuildDeliveryUrl()` trả `.../image/authenticated/{publicId}` — Cloudinary trả
+**401** vì URL của asset `authenticated` **bắt buộc** phải có chữ ký:
+
+| URL | Kết quả |
+|---|---|
+| `image/authenticated/{publicId}` | **401** |
+| `image/authenticated/s--SAI--/{publicId}` | **401** |
+| `image/authenticated/s--{đúng}--/{publicId}` | **200** |
+
+Chữ ký URL **khác** chữ ký API:
+
+```text
+url_signature = base64url(SHA1(publicId + api_secret))[0..8]
+api_signature = hex(SHA1("k1=v1&k2=v2" + api_secret))
+```
+
+`publicId` phải **không kèm đuôi file** (Cloudinary lưu format riêng). Nếu public
+id đã có `.png`, URL cần đuôi file gấp đôi (`a.png.png`) → nên code upload
+**không** ghi đuôi file vào public id (đổi `unique_filename` → `false` và tự đặt
+`public_id`).
+
+### Lỗi 8 — `rename`/`destroy` không truyền `type` (nặng)
+
+`rename` và `destroy` phải kèm `type=authenticated`, nếu không Cloudinary tìm asset
+type `upload` → `Resource not found` / `result: not found`. **Ảnh sẽ không bị xoá**
+(implicit leak). Đã thêm `type=authenticated` vào cả 3 lệnh (upload/rename/destroy)
+khi `UseSecureDelivery = true`.
+
+### Lỗi 9 — CDN invalidation bất đồng bộ (trung bình)
+
+API trả `ok` cho `destroy` nhưng CDN vẫn serve ảnh thêm **~7–40 giây**. Test
+lifecycle phải **poll** thay vì assert ngay, nếu không test sẽ chập chờn.
+
+### Kiểm thử
+
+- `CloudinaryLifecycleSmokeTests` — upload → download → move → download → delete
+  trên tài khoản thật (poll tới khi CDN hết cache).
+- `CloudinaryStorageTests` — thêm case cho `type=authenticated` (upload/rename/
+  destroy), chữ ký URL, và delivery URL có `s--`.
+- Toàn bộ suite: **233 test pass** (40 Web + 193 API), 0 fail.
+
 

@@ -318,7 +318,7 @@ Cấu hình ngưỡng tối thiểu: `Ocr:MinConfidence` (mặc định `0.60`).
 | `ApiKey` | API key | Có |
 | `ApiSecret` | API secret — **không bao giờ commit vào source** | Có |
 | `Folder` | Folder gốc trong Cloudinary | Có |
-| `UseSecureDelivery` | Dùng `image/authenticated` delivery type | Khuyến nghị `true` |
+| `UseSecureDelivery` | Dùng `image/authenticated` delivery type (asset lưu với `type=authenticated`) | Khuyến nghị `true` |
 | `MaxFileSizeBytes` | Giới hạn kích thước ảnh (khớp BR-09) | Có |
 | `AllowedFormats` | Chỉ cho phép `jpg`, `png` | Có |
 | `AutoInvalidate` | Tự invalidate CDN cache khi ảnh thay thế | Khuyến nghị `true` |
@@ -326,6 +326,13 @@ Cấu hình ngưỡng tối thiểu: `Ocr:MinConfidence` (mặc định `0.60`).
 > **Bảo mật:** `ApiSecret` phải nằm trong User Secrets, biến môi trường
 > (`CLOUDINARY__ApiSecret`) hoặc Key Vault — **không** đặt trong `appsettings.json`
 > đã commit. Xem `.gitignore` và `NOTES.md` §Bảo mật.
+
+> **Quan trọng — `type=authenticated` (xác minh trên cloud `smbl2hal`):** muốn ảnh
+> không đọc được công khai thì **phải truyền `type=authenticated` khi upload**.
+> `access_mode=authenticated` bị API **bỏ qua** (response vẫn trả
+> `access_mode: public`) và ảnh vẫn đọc được. Ngoài ra, `rename` và `destroy`
+> cũng **phải** kèm `type=authenticated`, nếu không Cloudinary sẽ tìm asset có
+> type `upload` và trả về `not found` — ảnh sẽ **không** bị xoá.
 
 ### 4.2. Signed upload
 
@@ -374,11 +381,32 @@ user-management/
 | Chế độ | URL pattern |
 |---|---|
 | Public (không khuyến nghị) | `https://res.cloudinary.com/{cloud}/image/upload/{publicId}` |
-| Authenticated | `https://res.cloudinary.com/{cloud}/image/authenticated/{publicId}` |
-| Signed (private, theo yêu cầu) | `https://res.cloudinary.com/{cloud}/image/authenticated/s--{signature}--/{publicId}` |
+| Authenticated (**bắt buộc có chữ ký**) | `https://res.cloudinary.com/{cloud}/image/authenticated/s--{signature}--/{publicId}` |
 
-Với `UseSecureDelivery = true`, dùng `image/authenticated`. Khi đó URL **có chữ ký
-theo thời gian** và hết hạn — cần sinh lại URL mỗi lần trả về cho client.
+Với `UseSecureDelivery = true`, dùng `image/authenticated`. Khi đó URL **phải kèm
+chữ ký**, nếu không Cloudinary trả **401**. URL không có TTL — chữ ký ở đây là
+chữ ký *tính từ public id*, không phải token hết hạn; nếu cần hết hạn thì dùng
+Cloudinary **access token** (`__cld_token__`).
+
+> **Xác minh thực tế trên cloud `smbl2hal`:**
+>
+> | URL | Kết quả |
+> |---|---|
+> | `image/authenticated/{publicId}` (không chữ ký) | **401** |
+> | `image/authenticated/s--XXXXXXXX--/{publicId}` (sai chữ ký) | **401** |
+> | `image/authenticated/s--{sig}--/{publicId}` (đúng chữ ký) | **200** |
+> | `image/upload/{publicId}` với asset `type=authenticated` | **404** (không lộ) |
+>
+> Công thức chữ ký URL (khác hẳn chữ ký API):
+>
+> ```text
+> signature = base64url(SHA1(publicId + api_secret))[0..8]
+> ```
+>
+> `publicId` là public id **không kèm đuôi file** (Cloudinary lưu format riêng).
+> Nếu public id đã có sẵn `.png`, URL cần đuôi file **gấp đôi**
+> (`{publicId}.png` → `{publicId}.png.png`) — vì vậy code upload **không** ghi đuôi
+> file vào public id.
 
 ### 4.5. Biến đổi ảnh (transformation)
 
@@ -555,12 +583,13 @@ Base URL: `https://{host}/api/v1`
 
 ```http
 HTTP/1.1 307 Temporary Redirect
-Location: https://res.cloudinary.com/demo/image/authenticated/s--sig--/user-management/identity-documents/.../front-abc.jpg
+Location: https://res.cloudinary.com/demo/image/authenticated/s--sig--/user-management/identity-documents/.../front-abc
 Cache-Control: private, max-age=300
 ```
 
 - Ảnh tải thẳng từ CDN Cloudinary → giảm tải cho API.
 - Cache-control ở tầng browser/proxy.
+- Chữ ký trong URL là `base64url(SHA1(publicId + api_secret))[0..8]` (§4.4).
 
 **Phương án B — Stream proxy (giữ nguyên hành vi hiện tại):**
 
@@ -866,9 +895,11 @@ Bổ sung vào `SRS.md` §5:
 
 ### BR-17 – Quyền truy cập ảnh
 
-- Ảnh phải được phục vụ qua `authenticated` delivery hoặc signed URL.
+- Ảnh phải được phục vụ qua `authenticated` delivery **kèm chữ ký** (§4.4).
+- Asset phải upload với `type=authenticated` — `access_mode` không có tác dụng.
 - Không đặt `public_id` trong HTML/mail/bất kỳ nơi công khai nào.
-- URL có chữ ký có thời hạn, không dùng lại lâu dài.
+- Chữ ký URL **không có TTL** (nó là hash của public id, không phải token hết hạn).
+  Nếu cần hết hạn thật sự → dùng Cloudinary **access token** (`__cld_token__`).
 
 ---
 
