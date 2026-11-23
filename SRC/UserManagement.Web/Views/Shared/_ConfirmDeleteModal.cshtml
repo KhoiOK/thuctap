@@ -1,0 +1,43 @@
+@*
+    Confirm-delete dialog. Renders an empty shell; site.js wires [data-confirm-delete]
+    triggers to populate the message + form action and open the panel.
+*@
+<div id="confirmDeleteModal" class="modal-backdrop" role="dialog" aria-modal="true"
+     aria-labelledby="confirmDeleteTitle" aria-describedby="confirmDeleteDesc" aria-hidden="true">
+    <div class="modal-panel">
+        <div class="flex items-start gap-4 p-6">
+            <span class="modal-icon" aria-hidden="true">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    <path d="M10 11v6M14 11v6" />
+                </svg>
+            </span>
+            <div class="min-w-0 flex-1">
+                <h2 id="confirmDeleteTitle" class="font-display text-lg font-bold text-ink-900 dark:text-white">
+                    Xóa người dùng?
+                </h2>
+                <p id="confirmDeleteDesc" class="mt-2 text-sm leading-relaxed text-ink-600 dark:text-ink-300"
+                   data-modal-message>
+                    Bạn có chắc chắn muốn xóa mục này?
+                </p>
+            </div>
+            <button type="button" data-modal-close class="icon-btn w-8 h-8 -mt-1 -mr-2 shrink-0" aria-label="Đóng">
+                <svg class="icon w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                     stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </button>
+        </div>
+
+        <div class="flex flex-col-reverse gap-2 px-6 pb-6 sm:flex-row sm:justify-end">
+            <button type="button" data-modal-close class="btn btn-secondary w-full sm:w-auto">Hủy bỏ</button>
+            <form id="confirmDeleteForm" method="post" data-async-delete class="sm:contents">
+                @Html.AntiForgeryToken()
+                <button type="submit" class="btn btn-danger w-full sm:w-auto" data-submit>
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                    Xóa vĩnh viễn
+                </button>
+            </form>
+        </div>
+    </div>
+</div>

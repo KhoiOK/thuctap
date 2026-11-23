@@ -1,0 +1,114 @@
+@* Pagination component. Model: UserListViewModel *@
+@model UserManagement.Web.ViewModels.Users.UserListViewModel
+@{
+    var vm = Model;
+    var result = vm.Result;
+    if (result is null) return;
+    var startItem = (result.Page - 1) * result.PageSize + 1;
+    var endItem = Math.Min(result.Page * result.PageSize, result.TotalItems);
+
+    // Windowed page numbers: 1 … 4 5 [6] 7 8 … 20
+    var pages = new List<int>();
+    var total = result.TotalPages;
+    var window = 2;
+    for (var p = 1; p <= total; p++)
+    {
+        if (p == 1 || p == total || Math.Abs(p - result.Page) <= window) pages.Add(p);
+    }
+    var withGaps = new List<int?>();
+    for (var i = 0; i < pages.Count; i++)
+    {
+        if (i > 0 && pages[i] - pages[i - 1] > 1) withGaps.Add(null);
+        withGaps.Add(pages[i]);
+    }
+
+    string LinkClass(bool disabled) => disabled ? "page-link is-disabled" : "page-link";
+}
+
+<div class="flex flex-col gap-4 px-5 sm:px-6 py-4 border-t border-surface-200 dark:border-ink-800
+            sm:flex-row sm:items-center sm:justify-between">
+    <p class="text-xs text-ink-500 dark:text-ink-400 text-center sm:text-left">
+        @if (result.TotalItems == 0)
+        {
+            <span>Không có bản ghi nào</span>
+        }
+        else
+        {
+            <span>
+                Hiển thị <strong class="font-semibold text-ink-700 dark:text-ink-200 tabular-nums">@startItem–@endItem</strong>
+                trong tổng <strong class="font-semibold text-ink-700 dark:text-ink-200 tabular-nums">@result.TotalItems.ToString("N0")</strong> người dùng
+            </span>
+        }
+    </p>
+
+    <div class="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:gap-4">
+        @* Page-size selector *@
+        <form method="get" class="flex items-center justify-center gap-2" action="@Url.Action("Index", "Users")">
+            <input type="hidden" name="keyword" value="@vm.Keyword" />
+            <input type="hidden" name="sortBy" value="@vm.SortBy" />
+            <input type="hidden" name="sortOrder" value="@vm.SortOrder" />
+            <input type="hidden" name="page" value="1" />
+            <label for="pageSizeSelect" class="text-xs text-ink-500 dark:text-ink-400 whitespace-nowrap">Mỗi trang</label>
+            <select id="pageSizeSelect" name="pageSize" onchange="this.form.submit()"
+                    class="field !w-auto !py-1.5 !text-xs !px-2.5" aria-label="Số bản ghi mỗi trang">
+                @foreach (var size in new[] { 10, 20, 50 })
+                {
+                    if (size == vm.PageSize)
+                    {
+                        <option value="@size" selected="selected">@size</option>
+                    }
+                    else
+                    {
+                        <option value="@size">@size</option>
+                    }
+                }
+            </select>
+            <noscript><button type="submit" class="btn btn-secondary btn-sm">Áp dụng</button></noscript>
+        </form>
+
+        @* Pager controls *@
+        @if (total > 1)
+        {
+            <nav class="flex items-center justify-center gap-1 flex-wrap" aria-label="Phân trang">
+                <a class="@LinkClass(!vm.HasPrev)" href="@Url.Action("Index", "Users")@(vm.HasPrev ? vm.BuildQueryString(1) : "")"
+                   title="Trang đầu" aria-label="Trang đầu" tabindex="@(vm.HasPrev ? 0 : -1)">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5M18 17l-5-5 5-5"/></svg>
+                </a>
+                <a class="@LinkClass(!vm.HasPrev)" href="@Url.Action("Index", "Users")@(vm.HasPrev ? vm.BuildQueryString(vm.Page - 1) : "")"
+                   title="Trang trước" aria-label="Trang trước" tabindex="@(vm.HasPrev ? 0 : -1)">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                </a>
+
+                @foreach (var p in withGaps)
+                {
+                    if (p is null)
+                    {
+                        <span class="grid place-items-center w-8 h-10 text-xs text-ink-400 dark:text-ink-500" aria-hidden="true">…</span>
+                    }
+                    else if (p == vm.Page)
+                    {
+                        <span class="page-link is-active tabular-nums" aria-current="page">@p</span>
+                    }
+                    else
+                    {
+                        <a class="page-link tabular-nums" href="@Url.Action("Index", "Users")@vm.BuildQueryString(p.Value)"
+                           aria-label="Trang @p">@p</a>
+                    }
+                }
+
+                <a class="@LinkClass(!vm.HasNext)" href="@Url.Action("Index", "Users")@(vm.HasNext ? vm.BuildQueryString(vm.Page + 1) : "")"
+                   title="Trang sau" aria-label="Trang sau" tabindex="@(vm.HasNext ? 0 : -1)">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </a>
+                <a class="@LinkClass(!vm.HasNext)" href="@Url.Action("Index", "Users")@(vm.HasNext ? vm.BuildQueryString(total) : "")"
+                   title="Trang cuối" aria-label="Trang cuối" tabindex="@(vm.HasNext ? 0 : -1)">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         stroke-linecap="round" stroke-linejoin="round"><path d="m13 17 5-5-5-5M6 17l5-5-5-5"/></svg>
+                </a>
+            </nav>
+        }
+    </div>
+</div>

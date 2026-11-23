@@ -1,0 +1,350 @@
+@model UserManagement.Web.ViewModels.Users.IdentityDocumentFormViewModel
+@{
+    var fieldErr = (string apiField) =>
+        Model.FieldErrors.TryGetValue(apiField, out var errs) && errs.Length > 0 ? errs[0] : null;
+    var isPassport = Model.DocumentType?.Equals("passport", StringComparison.OrdinalIgnoreCase) == true;
+    var action = Model.IsEdit ? "Edit" : "Create";
+    var routeValues = Model.IsEdit
+        ? new Dictionary<string, string> {
+            ["userId"] = Model.UserId.ToString(),
+            ["documentId"] = Model.DocumentId!.Value.ToString(),
+            ["returnUrl"] = Model.ReturnUrl ?? string.Empty
+        }
+        : new Dictionary<string, string> {
+            ["userId"] = Model.UserId.ToString(),
+            ["returnUrl"] = Model.ReturnUrl ?? string.Empty
+        };
+}
+
+<a asp-controller="Users" asp-action="Details" asp-route-id="@Model.UserId" asp-route-returnUrl="@Model.ReturnUrl" class="breadcrumb">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+         stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    Chi tiết người dùng
+</a>
+
+<div class="page-head">
+    <h1 class="page-title text-balance">@Model.Title</h1>
+    <p class="page-subtitle">Cập nhật thông tin giấy tờ tùy thân và ảnh scan.</p>
+</div>
+
+<div class="card max-w-4xl">
+    <div class="card-body">
+<form method="post" enctype="multipart/form-data" asp-controller="Documents" asp-action="@action" asp-all-route-data="@routeValues"
+      class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5" novalidate
+      data-ocr-scan-url="@Url.Action("OcrScan", "Documents", new { userId = Model.UserId })">
+    @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="UserId" />
+    @if (Model.IsEdit) { <input type="hidden" asp-for="DocumentId" /> }
+    <input type="hidden" asp-for="ReturnUrl" />
+
+    @* ---------- Document info ---------- *@
+    <div class="section-heading">
+        <span class="section-heading-icon" aria-hidden="true">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="14" x="3" y="5" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M15 11h3M15 14h3"/></svg>
+        </span>
+        <h2 class="section-heading-text">Thông tin giấy tờ</h2>
+        <span class="divider flex-1"></span>
+    </div>
+
+    <div>
+        <label asp-for="DocumentType" class="label">
+            Loại giấy tờ <span class="text-red-500" aria-hidden="true">*</span>
+        </label>
+        @if (Model.IsEdit)
+        {
+            <input asp-for="DocumentType" type="hidden" />
+            <div class="field !bg-surface-100 !text-ink-500 dark:!bg-ink-900 dark:!text-ink-400 flex items-center gap-2">
+                <svg class="w-4 h-4 shrink-0 text-ink-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="14" x="3" y="5" rx="2"/><circle cx="9" cy="11" r="2"/></svg>
+                @DocTypeDisplay(Model.DocumentType)
+            </div>
+            <p class="help-text">Không thể đổi loại giấy tờ sau khi đã tạo.</p>
+        }
+        else
+        {
+            <select asp-for="DocumentType" class="field" data-doc-type>
+                <option value="CCCD">CCCD — Căn cước công dân</option>
+                <option value="CMND">CMND — Chứng minh nhân dân</option>
+                <option value="Passport">Passport — Hộ chiếu</option>
+            </select>
+            <p class="help-text">Passport chỉ cần ảnh mặt trước.</p>
+        }
+        <span asp-validation-for="DocumentType" class="error-text"></span>
+    </div>
+
+    <div>
+        <label asp-for="DocumentNumber" class="label">
+            Số giấy tờ <span class="text-red-500" aria-hidden="true">*</span>
+            @if (Model.Ocr is not null)
+            {
+                var badge = Model.Ocr.ConfidenceBadge("documentNumber", Model.OcrMinConfidence, Model.OcrHighConfidence);
+                if (badge is not null)
+                {
+                    <span class="ocr-inline-badge" data-ocr-badge="documentNumber" data-kind="@badge"></span>
+                }
+            }
+        </label>
+        <input asp-for="DocumentNumber" class="field font-mono" placeholder="001234567890"
+               aria-describedby="documentNumber-error" data-ocr-field="documentNumber" />
+        @if (fieldErr("documentNumber") is string dnErr)
+        {
+            <p id="documentNumber-error" class="error-text">
+                <svg class="w-3.5 h-3.5 shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                <span>@dnErr</span>
+            </p>
+        }
+        <span asp-validation-for="DocumentNumber" class="error-text"></span>
+    </div>
+
+    <div>
+        <label asp-for="IssuedDate" class="label">
+            Ngày cấp
+            @if (Model.Ocr is not null)
+            {
+                var badge = Model.Ocr.ConfidenceBadge("issuedDate", Model.OcrMinConfidence, Model.OcrHighConfidence);
+                if (badge is not null)
+                {
+                    <span class="ocr-inline-badge" data-ocr-badge="issuedDate" data-kind="@badge"></span>
+                }
+            }
+        </label>
+        <input asp-for="IssuedDate" type="date" class="field" aria-describedby="issuedDate-error"
+               data-ocr-field="issuedDate" />
+        @if (fieldErr("issuedDate") is string idErr)
+        {
+            <p id="issuedDate-error" class="error-text">
+                <svg class="w-3.5 h-3.5 shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                <span>@idErr</span>
+            </p>
+        }
+        <span asp-validation-for="IssuedDate" class="error-text"></span>
+    </div>
+
+    <div>
+        <label asp-for="ExpiryDate" class="label">
+            Ngày hết hạn
+            @if (Model.Ocr is not null)
+            {
+                var badge = Model.Ocr.ConfidenceBadge("expiryDate", Model.OcrMinConfidence, Model.OcrHighConfidence);
+                if (badge is not null)
+                {
+                    <span class="ocr-inline-badge" data-ocr-badge="expiryDate" data-kind="@badge"></span>
+                }
+            }
+        </label>
+        <input asp-for="ExpiryDate" type="date" class="field" aria-describedby="expiryDate-error"
+               data-ocr-field="expiryDate" />
+        @if (fieldErr("expiryDate") is string edErr)
+        {
+            <p id="expiryDate-error" class="error-text">
+                <svg class="w-3.5 h-3.5 shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                <span>@edErr</span>
+            </p>
+        }
+        <span asp-validation-for="ExpiryDate" class="error-text"></span>
+    </div>
+
+    @* ---------- SCR-07 result panel ---------- *@
+    @if (!Model.IsEdit)
+    {
+        <div class="md:col-span-2" id="ocr-panel-host" data-ocr-panel-host>
+            @await Html.PartialAsync("_OcrResultPanel", Model)
+        </div>
+    }
+
+    @* ---------- Images ---------- *@
+    <div class="section-heading">
+        <span class="section-heading-icon" aria-hidden="true">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></svg>
+        </span>
+        <h2 class="section-heading-text">Ảnh scan</h2>
+        <span class="divider flex-1"></span>
+    </div>
+
+    @* ---------- SCR-07: automatic scan ---------- *@
+    @if (!Model.IsEdit)
+    {
+        <div class="md:col-span-2 ocr-actions">
+            <div class="ocr-actions-text">
+                <p class="ocr-actions-title">Quét tự động thông tin giấy tờ</p>
+                <p class="ocr-actions-sub">
+                    Chọn đủ ảnh mặt trước và mặt sau rồi bấm <strong>Quét tự động</strong> để điền nhanh thông tin.
+                    Bạn vẫn có thể nhập tay nếu quét lỗi.
+                </p>
+            </div>
+            <div class="ocr-actions-buttons">
+                <button type="button" id="ocr-scan-btn" class="btn btn-secondary" data-ocr-scan disabled
+                        title="Vui lòng chọn đủ ảnh mặt trước và mặt sau">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+                        <path d="M7 8h10M7 12h6"/>
+                    </svg>
+                    <span data-ocr-scan-label>Quét tự động</span>
+                </button>
+                <button type="button" id="ocr-skip-btn" class="btn btn-ghost hidden" data-ocr-skip>
+                    Bỏ qua, nhập tay
+                </button>
+            </div>
+        </div>
+    }
+
+    <div data-image-section="front">
+        <label asp-for="FrontImage" class="label">
+            Ảnh mặt trước @(Model.IsEdit)
+            {
+                <span class="font-normal text-ink-400 dark:text-ink-500">— để trống nếu giữ nguyên</span>
+            }
+        </label>
+        @if (Model.IsEdit && !string.IsNullOrEmpty(Model.ExistingFrontImageUrl))
+        {
+            <div class="mb-3 flex items-center gap-3 p-3 rounded-xl bg-surface-100 dark:bg-ink-800/60 border border-surface-200 dark:border-ink-700">
+                <img src="/Users/@Model.UserId/Documents/@Model.DocumentId/Image/front" alt="Ảnh hiện tại mặt trước"
+                     class="doc-thumb" loading="lazy" />
+                <div class="min-w-0">
+                    <p class="text-xs font-semibold text-ink-700 dark:text-ink-200">Ảnh hiện tại</p>
+                    <button type="button" data-lightbox="/Users/@Model.UserId/Documents/@Model.DocumentId/Image/front"
+                            data-lightbox-alt="Ảnh hiện tại — mặt trước" class="text-xs link-accent mt-0.5">
+                        Phóng to xem
+                    </button>
+                </div>
+            </div>
+        }
+        <div class="relative">
+            <input asp-for="FrontImage" type="file" accept="image/jpeg,image/png" class="field"
+                   data-preview-target="front-preview" />
+        </div>
+        <img data-preview-for="FrontImage" class="doc-thumb mt-3 hidden" alt="Xem trước ảnh mặt trước" />
+        <p class="help-text">Chỉ nhận JPG hoặc PNG, dung lượng tối đa 5 MB.</p>
+    </div>
+
+    @if (!isPassport)
+    {
+        <div data-image-section="back">
+            <label asp-for="BackImage" class="label">
+                Ảnh mặt sau @(Model.IsEdit)
+                {
+                    <span class="font-normal text-ink-400 dark:text-ink-500">— để trống nếu giữ nguyên</span>
+                }
+            </label>
+            @if (Model.IsEdit && !string.IsNullOrEmpty(Model.ExistingBackImageUrl))
+            {
+                <div class="mb-3 flex items-center gap-3 p-3 rounded-xl bg-surface-100 dark:bg-ink-800/60 border border-surface-200 dark:border-ink-700">
+                    <img src="/Users/@Model.UserId/Documents/@Model.DocumentId/Image/back" alt="Ảnh hiện tại mặt sau"
+                         class="doc-thumb" loading="lazy" />
+                    <div class="min-w-0">
+                        <p class="text-xs font-semibold text-ink-700 dark:text-ink-200">Ảnh hiện tại</p>
+                        <button type="button" data-lightbox="/Users/@Model.UserId/Documents/@Model.DocumentId/Image/back"
+                                data-lightbox-alt="Ảnh hiện tại — mặt sau" class="text-xs link-accent mt-0.5">
+                            Phóng to xem
+                        </button>
+                    </div>
+                </div>
+            }
+            <div class="relative">
+                <input asp-for="BackImage" type="file" accept="image/jpeg,image/png" class="field"
+                       data-preview-target="back-preview" />
+            </div>
+            <img data-preview-for="BackImage" class="doc-thumb mt-3 hidden" alt="Xem trước ảnh mặt sau" />
+            <p class="help-text">Bắt buộc với CCCD/CMND khi tạo mới.</p>
+        </div>
+    }
+
+    @* ---------- Error ---------- *@
+    @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+    {
+        <div class="md:col-span-2 alert alert-danger" role="alert">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></svg>
+            <p class="flex-1">@Model.ErrorMessage</p>
+        </div>
+    }
+
+    @* ---------- Actions ---------- *@
+    <div class="md:col-span-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end pt-2 mt-1 border-t border-surface-200 dark:border-ink-800">
+        <a asp-controller="Users" asp-action="Details" asp-route-id="@Model.UserId" asp-route-returnUrl="@Model.ReturnUrl"
+           class="btn btn-secondary w-full sm:w-auto">Hủy bỏ</a>
+        <button type="submit" class="btn btn-primary w-full sm:w-auto">
+            @if (Model.IsEdit)
+            {
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                     stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            }
+            else
+            {
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                     stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+            }
+            @Model.SubmitText
+        </button>
+    </div>
+</form>
+    </div>
+</div>
+
+@section Scripts {
+    @await Html.PartialAsync("_ValidationScriptsPartial")
+    <script src="~/js/ocr.js" asp-append-version="true"></script>
+    <script>
+        (function () {
+            // 1) Hide the back-image section for passports (Create only).
+            const typeSelect = document.querySelector('[data-doc-type]');
+            const backSection = document.querySelector('[data-image-section="back"]');
+            if (typeSelect && backSection) {
+                const syncBack = () => {
+                    const passport = typeSelect.value === 'Passport';
+                    backSection.classList.toggle('hidden', passport);
+                    const input = backSection.querySelector('input[type="file"]');
+                    if (passport && input) {
+                        input.value = '';
+                        const preview = backSection.querySelector('[data-preview-for]');
+                        if (preview) { preview.src = ''; preview.classList.add('hidden'); }
+                    }
+                };
+                typeSelect.addEventListener('change', syncBack);
+                syncBack();
+            }
+
+            // 2) Local image preview before upload.
+            document.querySelectorAll('input[type="file"][data-preview-for]').forEach(input => {
+                const preview = document.querySelector(`[data-preview-for="${input.name}"]`);
+                if (!preview) return;
+                input.addEventListener('change', () => {
+                    const file = input.files && input.files[0];
+                    if (!file) { preview.classList.add('hidden'); return; }
+                    if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+                    const url = URL.createObjectURL(file);
+                    preview.dataset.objectUrl = url;
+                    preview.src = url;
+                    preview.classList.remove('hidden');
+                });
+            });
+
+            // 3) Client-side file-size guard (server validates too).
+            const MAX_BYTES = 5 * 1024 * 1024;
+            document.querySelectorAll('input[type="file"]').forEach(input => {
+                input.addEventListener('change', () => {
+                    const file = input.files && input.files[0];
+                    if (file && file.size > MAX_BYTES) {
+                        Toast.show(`"${file.name}" vượt quá 5 MB. Vui lòng chọn ảnh nhỏ hơn.`, 'error');
+                        input.value = '';
+                        const preview = document.querySelector(`[data-preview-for="${input.name}"]`);
+                        if (preview) preview.classList.add('hidden');
+                    }
+                });
+            });
+        })();
+    </script>
+}
+
+@functions {
+    string DocTypeDisplay(string? type) => type switch
+    {
+        "cccd" => "CCCD",
+        "cmnd" => "CMND",
+        "passport" => "Passport",
+        _ => type ?? string.Empty
+    };
+}

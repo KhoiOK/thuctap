@@ -1,0 +1,13 @@
+{
+  "name": "usermanagement.web",
+  "version": "1.0.0",
+  "description": "User Management Web (ASP.NET Core MVC + Tailwind CSS CLI).",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i ./wwwroot/css/app.src.css -o ./wwwroot/css/app.css --minify",
+    "watch:css": "tailwindcss -i ./wwwroot/css/app.src.css -o ./wwwroot/css/app.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

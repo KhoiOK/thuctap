@@ -1,0 +1,82 @@
+@model UserManagement.Web.ViewModels.Users.IdentityDocumentFormViewModel
+@{
+    var ocr = Model.Ocr;
+    var min = Model.OcrMinConfidence;
+    var high = Model.OcrHighConfidence;
+
+    string BadgeClass(string? kind) => kind switch
+    {
+        "high" => "ocr-badge ocr-badge-high",
+        "medium" => "ocr-badge ocr-badge-medium",
+        "low" => "ocr-badge ocr-badge-low",
+        "missing" => "ocr-badge ocr-badge-missing",
+        _ => "ocr-badge ocr-badge-none"
+    };
+
+    string BadgeIcon(string? kind) => kind switch
+    {
+        "high" => "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6 9 17l-5-5\"/></svg>",
+        "medium" => "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 9v4M12 17h.01\"/><path d=\"M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z\"/></svg>",
+        "low" => "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M15 9l-6 6M9 9l6 6\"/></svg>",
+        _ => "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4M12 8h.01\"/></svg>"
+    };
+}
+
+@if (ocr is { HasResult: true })
+{
+    <div class="ocr-panel" data-ocr-panel>
+        <div class="ocr-panel-head">
+            <span class="ocr-panel-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+                    <path d="M7 8h10M7 12h6"/>
+                </svg>
+            </span>
+            <div class="min-w-0 flex-1">
+                <h3 class="ocr-panel-title">Kết quả quét tự động</h3>
+                <p class="ocr-panel-sub">Đã đọc được thông tin từ ảnh. Vui lòng kiểm tra lại trước khi lưu.</p>
+            </div>
+            <span class="ocr-panel-time">@ocr.ProcessingTimeMs ms</span>
+        </div>
+
+        <ul class="ocr-field-list">
+            @foreach (var (name, field) in ocr.Fields)
+            {
+                var display = UserManagement.Web.ViewModels.Users.OcrFieldNames.DisplayNames
+                    .GetValueOrDefault(name, name);
+                var kind = ocr.ConfidenceBadge(name, min, high);
+                var confidence = field.HasValue ? $"{field.Confidence:P0}" : "—";
+
+                <li class="ocr-field-item">
+                    <span class="ocr-field-name">@display</span>
+                    <span class="ocr-field-value @(field.HasValue ? "" : "is-empty")">
+                        @(field.HasValue ? field.Value : "Không đọc được")
+                    </span>
+                    <span class="@BadgeClass(kind)" title="Độ tin cậy @confidence">
+                        @Html.Raw(BadgeIcon(kind))
+                        <span>@confidence</span>
+                    </span>
+                </li>
+            }
+        </ul>
+
+        @if (ocr.Warnings.Count > 0)
+        {
+            <div class="ocr-warnings" role="status">
+                <p class="ocr-warnings-title">Cần kiểm tra</p>
+                <ul class="ocr-warnings-list">
+                    @foreach (var warning in ocr.Warnings)
+                    {
+                        <li>@warning</li>
+                    }
+                </ul>
+            </div>
+        }
+    </div>
+}
+else if (ocr is not null)
+{
+    <div class="ocr-panel ocr-panel-empty" role="status">
+        <p class="ocr-panel-sub">Không đọc được thông tin nào từ ảnh. Bạn vẫn có thể nhập thủ công và lưu bình thường.</p>
+    </div>
+}

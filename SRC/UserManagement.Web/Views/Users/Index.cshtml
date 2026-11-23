@@ -1,0 +1,430 @@
+@model UserManagement.Web.ViewModels.Users.UserListViewModel
+@{
+    ViewData["Title"] = "Người dùng";
+    var result = Model.Result;
+    var hasKeyword = !string.IsNullOrWhiteSpace(Model.Keyword);
+    var hasFilters = hasKeyword;
+    var sortIcon = (string col) => Model.SortBy.Equals(col, StringComparison.OrdinalIgnoreCase)
+        ? (Model.SortOrder == "asc" ? "asc" : "desc")
+        : null;
+    var initialOf = (string name) =>
+        string.IsNullOrWhiteSpace(name) ? "?" : name.Trim()[..1].ToUpperInvariant();
+}
+
+<div class="page-head flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+    <div class="min-w-0">
+        <h1 class="page-title text-balance">Người dùng</h1>
+        <p class="page-subtitle">
+            @if (result is not null)
+            {
+                <span>Quản lý hồ sơ <strong class="font-semibold text-ink-700 dark:text-ink-200">@result.TotalItems.ToString("N0")</strong> người dùng trong hệ thống.</span>
+            }
+            else
+            {
+                <span>Đang tải dữ liệu…</span>
+            }
+        </p>
+    </div>
+    <a asp-action="Create" class="btn btn-primary shrink-0">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+        Thêm người dùng
+    </a>
+</div>
+
+@* ---------------- Stats (only when a result set exists) ---------------- *@
+@if (result is not null)
+{
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+        <div class="stat-card">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <p class="stat-label">Tổng người dùng</p>
+                    <p class="stat-value">@result.TotalItems.ToString("N0")</p>
+                </div>
+                <span class="stat-icon bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-400">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+                        <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                    </svg>
+                </span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <p class="stat-label">Trang hiện tại</p>
+                    <p class="stat-value">@result.Page<span class="text-base font-semibold text-ink-400 dark:text-ink-500">/@result.TotalPages</span></p>
+                </div>
+                <span class="stat-icon bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2Z" />
+                        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7Z" />
+                    </svg>
+                </span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <p class="stat-label">Giấy tờ tùy thân</p>
+                    <p class="stat-value">@result.Items.Sum(i => i.IdentityDocumentCount).ToString("N0")</p>
+                    <p class="text-[11px] text-ink-400 dark:text-ink-500 mt-0.5">trong trang này</p>
+                </div>
+                <span class="stat-icon bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" /><path d="M9 15h6M9 11h3" />
+                    </svg>
+                </span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <p class="stat-label">Bộ lọc đang áp dụng</p>
+                    <p class="stat-value">@(hasFilters ? "1" : "0")</p>
+                    <p class="text-[11px] text-ink-400 dark:text-ink-500 mt-0.5">@(hasFilters ? "theo từ khóa" : "không có")</p>
+                </div>
+                <span class="stat-icon bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                    </svg>
+                </span>
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------------- Search & filter bar ---------------- *@
+<form method="get" asp-action="Index" class="card mb-6" data-search-form role="search">
+    <div class="card-body">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div class="input-group flex-1 min-w-0">
+                <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+                </svg>
+                <input id="keyword" type="search" name="keyword" value="@Model.Keyword"
+                       class="field" placeholder="Tìm theo họ tên, email hoặc số điện thoại…"
+                       autocomplete="off" aria-label="Tìm kiếm người dùng" />
+            </div>
+
+            <div class="flex items-center gap-2 shrink-0">
+                <button type="submit" class="btn btn-primary">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+                    </svg>
+                    <span class="hidden sm:inline">Tìm kiếm</span>
+                </button>
+                @if (hasFilters)
+                {
+                    <a asp-action="Index" class="btn btn-ghost" title="Xóa bộ lọc">
+                        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                             stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18 6 6 18M6 6l12 12" />
+                        </svg>
+                        <span class="hidden sm:inline">Xóa lọc</span>
+                    </a>
+                }
+            </div>
+        </div>
+        <input type="hidden" name="page" value="1" />
+        <input type="hidden" name="sortBy" value="@Model.SortBy" />
+        <input type="hidden" name="sortOrder" value="@Model.SortOrder" />
+    </div>
+</form>
+
+@* ---------------- Error banner ---------------- *@
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-danger mb-6" role="alert">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
+        </svg>
+        <div class="flex-1 min-w-0">
+            <p class="font-semibold">Không thể tải dữ liệu</p>
+            <p class="mt-0.5 opacity-90">@Model.ErrorMessage</p>
+        </div>
+        <a asp-action="Index" class="btn btn-secondary btn-sm shrink-0">Thử lại</a>
+    </div>
+}
+else if (result is null)
+{
+    @* ---------------- Loading skeleton ---------------- *@
+    <div class="card">
+        <div class="card-header">
+            <div class="skeleton h-5 w-40"></div>
+            <div class="skeleton h-9 w-28"></div>
+        </div>
+        <div class="card-body space-y-3">
+            @for (var i = 0; i < 6; i++)
+            {
+                <div class="flex items-center gap-4">
+                    <div class="skeleton w-10 h-10 rounded-full shrink-0"></div>
+                    <div class="flex-1 space-y-2">
+                        <div class="skeleton h-3.5" style="max-width:@(60 + i * 7)px"></div>
+                        <div class="skeleton h-3 w-1/3"></div>
+                    </div>
+                    <div class="skeleton h-8 w-24 rounded-lg shrink-0"></div>
+                </div>
+            }
+        </div>
+    </div>
+}
+else if (result.Items.Count == 0)
+{
+    @* ---------------- Empty states ---------------- *@
+    <div class="card">
+        <div class="empty-state">
+            <span class="empty-icon">
+                @if (hasKeyword)
+                {
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3M8 11h6" />
+                    </svg>
+                }
+                else
+                {
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+                        <path d="M19 8v6M22 11h-6" />
+                    </svg>
+                }
+            </span>
+            <h2 class="empty-title">
+                @(hasKeyword ? "Không tìm thấy kết quả" : "Chưa có người dùng nào")
+            </h2>
+            <p class="empty-text">
+                @(hasKeyword
+                    ? $"Không có người dùng nào khớp với \"{Model.Keyword}\". Thử một từ khóa khác hoặc xóa bộ lọc."
+                    : "Bắt đầu bằng cách thêm người dùng đầu tiên vào hệ thống.")
+            </p>
+            <div class="mt-6 flex flex-col sm:flex-row items-center gap-2">
+                @if (hasKeyword)
+                {
+                    <a asp-action="Index" class="btn btn-secondary w-full sm:w-auto">Xóa bộ lọc</a>
+                }
+                <a asp-action="Create" class="btn btn-primary w-full sm:w-auto">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+                    Thêm người dùng
+                </a>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    @* ---------------- Users table ---------------- *@
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <div class="flex items-center gap-3 min-w-0">
+                <span class="stat-pill shrink-0">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+                    @result.TotalItems.ToString("N0") kết quả
+                </span>
+                @if (hasKeyword)
+                {
+                    <span class="stat-pill shrink-0 max-w-[16rem]">
+                        <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                             stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                        <span class="truncate">@Model.Keyword</span>
+                    </span>
+                }
+            </div>
+            <div class="hidden sm:flex items-center gap-1.5 text-xs text-ink-400 dark:text-ink-500">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round"><path d="m19 9-5 5-4-4-3 3"/><path d="M5 21h14"/></svg>
+                Nhấp tiêu đề để sắp xếp
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table class="table table-responsive">
+                <caption class="sr-only">Danh sách người dùng</caption>
+                <thead>
+                    <tr>
+                        <th scope="col" class="w-14">#</th>
+                        <th scope="col">
+                            <a class="th-sort @(sortIcon("fullName") is not null ? "is-sorted" : "")"
+                               href="@Url.Action("Index", "Users")@Model.BuildQueryString(1, newSortBy: "fullName", newSortOrder: Model.PreviousSortOrder("fullName"))"
+                               aria-label="Sắp xếp theo họ tên">
+                                Người dùng
+                                @if (sortIcon("fullName") is not null)
+                                {
+                                    @if (sortIcon("fullName") == "asc")
+                                    {
+                                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                                    }
+                                    else
+                                    {
+                                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                                    }
+                                }
+                            </a>
+                        </th>
+                        <th scope="col">
+                            <a class="th-sort @(sortIcon("email") is not null ? "is-sorted" : "")"
+                               href="@Url.Action("Index", "Users")@Model.BuildQueryString(1, newSortBy: "email", newSortOrder: Model.PreviousSortOrder("email"))"
+                               aria-label="Sắp xếp theo email">
+                                Liên hệ
+                                @if (sortIcon("email") is not null)
+                                {
+                                    @if (sortIcon("email") == "asc")
+                                    {
+                                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                                    }
+                                    else
+                                    {
+                                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                                    }
+                                }
+                            </a>
+                        </th>
+                        <th scope="col" class="hidden lg:table-cell">Giới tính</th>
+                        <th scope="col" class="hidden md:table-cell text-center">Giấy tờ</th>
+                        <th scope="col">
+                            <a class="th-sort @(sortIcon("createdAt") is not null ? "is-sorted" : "")"
+                               href="@Url.Action("Index", "Users")@Model.BuildQueryString(1, newSortBy: "createdAt", newSortOrder: Model.PreviousSortOrder("createdAt"))"
+                               aria-label="Sắp xếp theo ngày tạo">
+                                Ngày tạo
+                                @if (sortIcon("createdAt") is not null)
+                                {
+                                    @if (sortIcon("createdAt") == "asc")
+                                    {
+                                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                                    }
+                                    else
+                                    {
+                                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                                    }
+                                }
+                            </a>
+                        </th>
+                        <th scope="col" class="text-right w-px">
+                            <span class="sr-only">Thao tác</span>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @{
+                        var startIndex = (result.Page - 1) * result.PageSize;
+                    }
+                    @foreach (var (item, idx) in result.Items.Select((it, i) => (it, i)))
+                    {
+                        var genderLabel = item.Gender switch
+                        {
+                            "male" => "Nam",
+                            "female" => "Nữ",
+                            "other" => "Khác",
+                            _ => "—"
+                        };
+                        var genderClass = item.Gender switch
+                        {
+                            "male" => "badge-brand",
+                            "female" => "badge-danger",
+                            "other" => "badge-warning",
+                            _ => "badge-neutral"
+                        };
+
+                        <tr class="group">
+                            <td class="text-ink-400 dark:text-ink-500 text-xs tabular-nums" data-label="#" data-index="true">@(startIndex + idx + 1)</td>
+
+                            <td data-primary="true">
+                                <div class="flex items-center gap-3 min-w-0">
+                                    <span class="avatar w-10 h-10 text-sm shrink-0" aria-hidden="true">@initialOf(item.FullName)</span>
+                                    <div class="min-w-0">
+                                        <a asp-action="Details" asp-route-id="@item.Id" asp-route-returnUrl="@(Context.Request.QueryString.Value)"
+                                           class="block font-semibold text-ink-900 dark:text-white hover:text-brand-600 dark:hover:text-brand-400 transition-colors truncate">
+                                            @item.FullName
+                                        </a>
+                                        <span class="block text-xs text-ink-400 dark:text-ink-500 truncate">ID: @item.Id.ToString()[..Math.Min(8, item.Id.ToString().Length)]</span>
+                                    </div>
+                                </div>
+                            </td>
+
+                            <td data-label="Liên hệ">
+                                <div class="min-w-0">
+                                    <a href="mailto:@item.Email"
+                                       class="block text-sm text-ink-700 dark:text-ink-200 hover:text-brand-600 dark:hover:text-brand-400 transition-colors truncate">
+                                        @item.Email
+                                    </a>
+                                    <span class="block text-xs text-ink-400 dark:text-ink-500 tabular-nums">@item.PhoneNumber</span>
+                                </div>
+                            </td>
+
+                            <td class="hidden lg:table-cell" data-label="Giới tính">
+                                <span class="badge @genderClass">@genderLabel</span>
+                            </td>
+
+                            <td class="hidden md:table-cell text-center" data-label="Giấy tờ">
+                                @if (item.IdentityDocumentCount > 0)
+                                {
+                                    <span class="badge badge-success" title="@item.IdentityDocumentCount giấy tờ">
+                                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                                        @item.IdentityDocumentCount
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-neutral">—</span>
+                                }
+                            </td>
+
+                            <td data-label="Ngày tạo">
+                                <span class="text-sm tabular-nums whitespace-nowrap">@item.CreatedAt.ToString("dd/MM/yyyy")</span>
+                            </td>
+
+                            <td data-actions="true">
+                                <div class="flex items-center justify-end gap-1">
+                                    <a asp-action="Details" asp-route-id="@item.Id" asp-route-returnUrl="@(Context.Request.QueryString.Value)"
+                                       class="icon-btn w-9 h-9" title="Xem chi tiết" aria-label="Xem chi tiết @item.FullName">
+                                        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                             stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" />
+                                        </svg>
+                                    </a>
+                                    <a asp-action="Edit" asp-route-id="@item.Id" asp-route-returnUrl="@(Context.Request.QueryString.Value)"
+                                       class="icon-btn w-9 h-9" title="Chỉnh sửa" aria-label="Chỉnh sửa @item.FullName">
+                                        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                             stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                        </svg>
+                                    </a>
+                                    <a href="@Url.Action("Delete", "Users", new { id = item.Id, returnUrl = Context.Request.QueryString.Value })"
+                                       data-confirm-delete
+                                       data-confirm-title="Xóa người dùng?"
+                                       data-confirm-message="Bạn có chắc chắn muốn xóa người dùng &quot;@item.FullName&quot;? Tất cả giấy tờ và ảnh của họ cũng sẽ bị xóa. Hành động này không thể hoàn tác."
+                                       data-return-url="@Context.Request.QueryString.Value"
+                                       class="icon-btn w-9 h-9 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-500/10"
+                                       title="Xóa" aria-label="Xóa @item.FullName">
+                                        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                             stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                                            <path d="M10 11v6M14 11v6" />
+                                        </svg>
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @await Html.PartialAsync("_Pagination", Model)
+    </div>
+}

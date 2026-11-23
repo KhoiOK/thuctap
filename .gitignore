@@ -1,0 +1,47 @@
+# ===== Build output =====
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userprefs
+.vs/
+.vscode/
+.idea/
+
+# ===== Node / Tailwind =====
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ===== Secrets — KHÔNG BAO GIỜ COMMIT =====
+# Cloudinary ApiSecret, connection string production, OCR keys...
+appsettings.Production.json
+appsettings.*.local.json
+appsettings.Development.local.json
+secrets.json
+.env
+.env.*
+!.env.example
+
+# ===== Test artifacts =====
+TestResults/
+*.trx
+coverage*.xml
+coverage*.json
+*.coverage
+
+# ===== Logs =====
+*.log
+logs/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== PDF build artifacts (tools/build_srs_pdf.py) =====
+docs/*-v2.0-ORIGINAL.pdf
+tools/__pycache__/

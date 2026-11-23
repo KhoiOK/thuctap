@@ -1,0 +1,153 @@
+@model UserManagement.Web.ViewModels.Users.UserFormViewModel
+@{
+    var fieldErr = (string apiField) => Model.GetFieldError(apiField);
+}
+
+<form method="post" asp-action="@(Model.IsEdit ? "Edit" : "Create")" asp-route-id="@Model.Id" asp-route-returnUrl="@Model.ReturnUrl"
+      class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5" novalidate>
+    @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="ReturnUrl" />
+
+    @* ---------- Personal info ---------- *@
+    <div class="section-heading">
+        <span class="section-heading-icon" aria-hidden="true">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="8" r="4" /><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+            </svg>
+        </span>
+        <h2 class="section-heading-text">Thông tin cá nhân</h2>
+        <span class="divider flex-1"></span>
+    </div>
+
+    <div class="md:col-span-2">
+        <label asp-for="FullName" class="label">
+            Họ và tên <span class="text-red-500" aria-hidden="true">*</span>
+        </label>
+        <div class="input-group">
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="8" r="4" /><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+            </svg>
+            <input asp-for="FullName" class="field" placeholder="Nguyễn Văn A"
+                   aria-describedby="fullName-error" autocomplete="name" />
+        </div>
+        @if (fieldErr("fullName") is string fnErr)
+        {
+            <p id="fullName-error" class="error-text">
+                <svg class="w-3.5 h-3.5 shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                <span>@fnErr</span>
+            </p>
+        }
+        <span asp-validation-for="FullName" class="error-text"></span>
+    </div>
+
+    <div>
+        <label asp-for="Email" class="label">
+            Email <span class="text-red-500" aria-hidden="true">*</span>
+        </label>
+        <div class="input-group">
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                <rect width="20" height="16" x="2" y="4" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+            </svg>
+            <input asp-for="Email" type="email" class="field" placeholder="email@example.com"
+                   aria-describedby="email-error" autocomplete="email" />
+        </div>
+        @if (fieldErr("email") is string emErr)
+        {
+            <p id="email-error" class="error-text">
+                <svg class="w-3.5 h-3.5 shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                <span>@emErr</span>
+            </p>
+        }
+        <span asp-validation-for="Email" class="error-text"></span>
+    </div>
+
+    <div>
+        <label asp-for="PhoneNumber" class="label">
+            Số điện thoại <span class="text-red-500" aria-hidden="true">*</span>
+        </label>
+        <div class="input-group">
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z" />
+            </svg>
+            <input asp-for="PhoneNumber" type="tel" class="field" placeholder="0901234567"
+                   aria-describedby="phoneNumber-error" autocomplete="tel" />
+        </div>
+        @if (fieldErr("phoneNumber") is string phErr)
+        {
+            <p id="phoneNumber-error" class="error-text">
+                <svg class="w-3.5 h-3.5 shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                <span>@phErr</span>
+            </p>
+        }
+        <span asp-validation-for="PhoneNumber" class="error-text"></span>
+    </div>
+
+    <div>
+        <label asp-for="DateOfBirth" class="label">Ngày sinh</label>
+        <input asp-for="DateOfBirth" type="date" class="field" aria-describedby="dateOfBirth-error"
+               autocomplete="bday" max="@DateTime.UtcNow.Date.ToString("yyyy-MM-dd")" />
+        @if (fieldErr("dateOfBirth") is string dobErr)
+        {
+            <p id="dateOfBirth-error" class="error-text">
+                <svg class="w-3.5 h-3.5 shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                <span>@dobErr</span>
+            </p>
+        }
+        <span asp-validation-for="DateOfBirth" class="error-text"></span>
+    </div>
+
+    <div>
+        <label asp-for="Gender" class="label">Giới tính</label>
+        <select asp-for="Gender" class="field">
+            <option value="">— Chưa chọn —</option>
+            <option value="male">Nam</option>
+            <option value="female">Nữ</option>
+            <option value="other">Khác</option>
+        </select>
+        <span asp-validation-for="Gender" class="error-text"></span>
+    </div>
+
+    <div class="md:col-span-2">
+        <label asp-for="Address" class="label">Địa chỉ</label>
+        <textarea asp-for="Address" rows="3" class="field" placeholder="Số nhà, đường, phường/xã, quận/huyện, tỉnh/thành phố"
+                  autocomplete="street-address"></textarea>
+        <p class="help-text">Không bắt buộc — giúp nhận diện địa chỉ chính xác hơn.</p>
+        <span asp-validation-for="Address" class="error-text"></span>
+    </div>
+
+    @* ---------- General error ---------- *@
+    @if (!string.IsNullOrEmpty(Model.GeneralError))
+    {
+        <div class="md:col-span-2 alert alert-danger" role="alert">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
+            </svg>
+            <p class="flex-1">@Model.GeneralError</p>
+        </div>
+    }
+
+    @* ---------- Actions ---------- *@
+    <div class="md:col-span-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end pt-2 mt-1 border-t border-surface-200 dark:border-ink-800">
+        <a asp-action="Index" asp-route-returnUrl="@Model.ReturnUrl" class="btn btn-secondary w-full sm:w-auto">
+            Hủy bỏ
+        </a>
+        <button type="submit" class="btn btn-primary w-full sm:w-auto">
+            @if (Model.IsEdit)
+            {
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                     stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            }
+            else
+            {
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                     stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+            }
+            @Model.SubmitText
+        </button>
+    </div>
+</form>
