@@ -468,6 +468,28 @@
         function syncFromLibrary(input) {
             const invalid = input.classList.contains('input-validation-error');
             input.classList.toggle('field-invalid', invalid);
+
+            // Razor renders <span asp-validation-for> with a hard-coded "hidden"
+            // utility class. The unobtrusive adapter only toggles
+            // field-validation-valid / field-validation-error, so that "hidden"
+            // would keep the message invisible even when the field is invalid.
+            // The container is therefore un-hidden while the field is in error.
+            const container = messageContainer(input);
+            if (container) {
+                container.classList.toggle('hidden', !invalid);
+            }
+        }
+
+        // The unobtrusive adapter renders the error message into the
+        // [data-valmsg-for] container and toggles field-validation-error on it.
+        // It never touches the "hidden" utility class that Razor adds, so the
+        // message would stay invisible. This hook runs after every validation
+        // pass and makes the container visible exactly when it holds an error.
+        function syncValidationContainers(root) {
+            $$('[data-valmsg-for]', root).forEach(container => {
+                const hasError = container.classList.contains('field-validation-error');
+                container.classList.toggle('hidden', !hasError);
+            });
         }
 
         // Fallback used when the unobtrusive adapter is not loaded.
@@ -508,9 +530,12 @@
             // which adds/removes `input-validation-error` on validation.
             const $ = window.jQuery;
             if ($) {
-                $$('form').forEach(form => {
+                const wire = form => {
                     const $form = $(form);
-                    if (!$form.data('validator')) return;
+                    if (!$form.data('validator')) return false;
+                    if ($form.data('umValidationWired')) return true;
+                    $form.data('umValidationWired', true);
+
                     $form.on('invalid.field', e => {
                         const el = e.target;
                         if (el && el.classList) syncFromLibrary(el);
@@ -519,7 +544,48 @@
                         const el = e.target;
                         if (el && el.classList) syncFromLibrary(el);
                     });
-                });
+
+                    // jQuery Validate does not raise a "form validated" event, so the
+                    // containers are synced through the adapter's own showErrors hook
+                    // to guarantee that a visible error message is displayed.
+                    const validator = $form.data('validator');
+                    if (validator && validator.settings) {
+                        const originalShowErrors = validator.settings.showErrors;
+                        validator.settings.showErrors = function (errorMap, errorList) {
+                            if (originalShowErrors) {
+                                originalShowErrors.call(this, errorMap, errorList);
+                            } else {
+                                // jQuery Validate only renders highlight + messages via
+                                // defaultShowErrors() when no custom showErrors hook is
+                                // configured (the unobtrusive adapter does not set one).
+                                // Without this call the errorMap is populated but nothing
+                                // is ever displayed.
+                                this.defaultShowErrors();
+                            }
+                            // The adapter finishes rendering the "valid" messages after
+                            // showErrors returns, so the containers are synced on the
+                            // next tick to see the final class state.
+                            window.setTimeout(() => syncValidationContainers(form), 0);
+                        };
+                    }
+                    return true;
+                };
+
+                $$('form').forEach(form => wire(form));
+
+                // site.js is loaded BEFORE the jquery-validation scripts (they live in
+                // the page's Scripts section), so the validator does not exist yet when
+                // this module boots. The wiring is therefore repeated once the document
+                // has finished loading, when the adapter has attached itself.
+                if (document.readyState === 'complete') {
+                    $$('form').forEach(form => wire(form));
+                } else {
+                    window.addEventListener('load', () => {
+                        $$('form').forEach(form => wire(form));
+                        // A first validation pass may already have happened.
+                        syncValidationContainers(document);
+                    });
+                }
             }
         }
         return { init };

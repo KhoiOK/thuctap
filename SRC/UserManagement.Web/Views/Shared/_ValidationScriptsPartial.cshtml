@@ -1,2 +1,8 @@
-﻿<script src="~/lib/jquery-validation/dist/jquery.validate.min.js"></script>
+﻿@* jQuery is loaded by _Layout.cshtml because both the validation plugins and site.js
+   depend on the global it provides. *@
+<script src="~/lib/jquery-validation/dist/jquery.validate.min.js"></script>
+@* additional-methods.js provides the custom "regex" rule that the phone-number
+   field relies on (data-val-regex-pattern). Without it jQuery Validate silently
+   drops the rule and the invalid phone number is accepted. *@
+<script src="~/lib/jquery-validation/dist/additional-methods.min.js"></script>
 <script src="~/lib/jquery-validation-unobtrusive/dist/jquery.validate.unobtrusive.min.js"></script>
