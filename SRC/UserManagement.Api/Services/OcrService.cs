@@ -35,6 +35,20 @@ public interface IOcrService
         Guid userId,
         OcrConfirmRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Runs the OCR engine against the given images WITHOUT persisting anything and
+    /// without requiring an existing user. Used by the Quick Create flow to pre-fill the
+    /// user form before the user record exists (API-12b).
+    ///
+    /// Unlike <see cref="ScanAsync"/>:
+    /// - no user is required,
+    /// - no temporary Cloudinary asset is created (the engine reads the streams directly),
+    /// - no <c>OcrExtractionResult</c> row is written, so the result cannot be confirmed.
+    /// </summary>
+    Task<OcrPreviewResponse> PreviewAsync(
+        OcrPreviewRequest request,
+        CancellationToken cancellationToken);
 }
 
 public class OcrService : IOcrService
@@ -189,6 +203,73 @@ public class OcrService : IOcrService
         }
     }
 
+    public async Task<OcrPreviewResponse> PreviewAsync(
+        OcrPreviewRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!_options.Enabled)
+        {
+            throw new OcrUnavailableException("Tính năng quét tự động đang tắt.");
+        }
+
+        var documentType = request.DocumentType;
+        var requiresBack = documentType is DocumentType.CCCD or DocumentType.CMND;
+
+        // ---- 1. Validate images (same rules as API-12) ----
+        await ValidateImageAsync(request.FrontImage, "front", cancellationToken);
+        if (request.BackImage is { Length: > 0 })
+        {
+            if (documentType == DocumentType.Passport)
+            {
+                throw new ValidationException(new Dictionary<string, string[]>
+                {
+                    ["backImage"] = new[] { "Passport không được có ảnh mặt sau." }
+                });
+            }
+            await ValidateImageAsync(request.BackImage, "back", cancellationToken);
+        }
+        else if (requiresBack)
+        {
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["backImage"] = new[] { "Ảnh mặt sau là bắt buộc với CCCD/CMND." }
+            });
+        }
+
+        var startedAt = _time.GetUtcNow().UtcDateTime;
+
+        // ---- 2. Call the OCR engine ----
+        // The engine reads the streams directly, so a preview needs no Cloudinary asset
+        // and leaves nothing behind to clean up.
+        await using var frontStream = request.FrontImage!.OpenReadStream();
+        await using var backStream = request.BackImage is { Length: > 0 }
+            ? request.BackImage.OpenReadStream()
+            : null;
+
+        var response = await _ocrClient.RecognizeAsync(
+            frontStream,
+            backStream!,
+            documentType.ToString(),
+            cancellationToken);
+
+        // ---- 3. Normalize ----
+        var confidences = response.Fields?.ToDictionary(
+            k => k.Key,
+            v => v.Value.Confidence,
+            StringComparer.Ordinal) ?? new Dictionary<string, double>();
+
+        var extracted = OcrFieldExtractor.Extract(response.RawText);
+        var fields = _normalizer.Normalize(extracted, documentType, confidences);
+
+        var processingTimeMs = (int)(_time.GetUtcNow().UtcDateTime - startedAt).TotalMilliseconds;
+
+        return new OcrPreviewResponse(
+            documentType,
+            fields,
+            BuildWarnings(fields, response.Warnings),
+            processingTimeMs);
+    }
+
     public async Task<IdentityDocumentListItemDto> ConfirmAsync(
         Guid userId,
         OcrConfirmRequest request,
@@ -227,6 +308,72 @@ public class OcrService : IOcrService
         await EnsureDocumentTypeSlotAvailableAsync(userId, documentType, cancellationToken);
         await EnsureDocumentNumberAvailableAsync(documentType, documentNumber, cancellationToken);
 
+        // ---- Resolve the temporary assets ----
+        // The public ids come from the scan record ONLY. The client does not get to
+        // choose which asset is promoted: accepting a client-supplied public id would
+        // let a caller promote (and thereby read) an arbitrary asset - including one
+        // belonging to another user or another scan.
+        var frontSource = scan.FrontImagePublicId;
+        if (string.IsNullOrWhiteSpace(frontSource))
+        {
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["frontImage"] = new[] { "Ảnh mặt trước của phiên quét không còn tồn tại." }
+            });
+        }
+
+        var backSource = scan.BackImagePublicId;
+
+        // ---- Verify the assets really belong to this scan ----
+        // The public ids are stored in the temporary folder `tmp/{scanId}` (BR-15).
+        // Checking the folder makes sure the scan record cannot point at a permanent
+        // (already promoted) asset or at an asset of a different scan.
+        //
+        // This check runs BEFORE the document-type rules on purpose: it is a security
+        // check (is this asset really mine?) and must not be masked by a business rule
+        // (do I need a back image?) that fires earlier.
+        EnsureBelongsToScan(frontSource, scan.ScanId, "frontImage");
+        if (!string.IsNullOrWhiteSpace(backSource))
+        {
+            EnsureBelongsToScan(backSource, scan.ScanId, "backImage");
+        }
+
+        // ---- Enforce the same image rules as the manual flow ----
+        // CCCD/CMND must have a back image, Passport must not have one.
+        var requiresBack = documentType is DocumentType.CCCD or DocumentType.CMND;
+        if (requiresBack && string.IsNullOrWhiteSpace(backSource))
+        {
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["backImage"] = new[] { "Ảnh mặt sau là bắt buộc với CCCD/CMND." }
+            });
+        }
+        if (documentType == DocumentType.Passport && !string.IsNullOrWhiteSpace(backSource))
+        {
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["backImage"] = new[] { "Passport không được có ảnh mặt sau." }
+            });
+        }
+
+        // ---- Check the assets still exist on Cloudinary ----
+        // A scan whose temporary images were already deleted (or expired) must not
+        // produce a document that points at a missing image.
+        if (!await AssetExistsAsync(frontSource, cancellationToken))
+        {
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["frontImage"] = new[] { "Ảnh mặt trước của phiên quét không còn tồn tại trên máy chủ." }
+            });
+        }
+        if (!string.IsNullOrWhiteSpace(backSource) && !await AssetExistsAsync(backSource, cancellationToken))
+        {
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["backImage"] = new[] { "Ảnh mặt sau của phiên quét không còn tồn tại trên máy chủ." }
+            });
+        }
+
         var documentId = Guid.NewGuid();
         var targetFolder = $"identity-documents/{userId}/{documentId}";
 
@@ -236,20 +383,10 @@ public class OcrService : IOcrService
         string? backPublicId = null;
         long backVersion = 0;
 
-        var frontSource = request.FrontImagePublicId ?? scan.FrontImagePublicId;
-        if (string.IsNullOrWhiteSpace(frontSource))
-        {
-            throw new ValidationException(new Dictionary<string, string[]>
-            {
-                ["frontImage"] = new[] { "Ảnh mặt trước của phiên quét không còn tồn tại." }
-            });
-        }
-
         var movedFront = await _cloudinary.MoveAsync(frontSource, targetFolder, cancellationToken);
         frontPublicId = movedFront.PublicId;
         frontVersion = movedFront.Version;
 
-        var backSource = request.BackImagePublicId ?? scan.BackImagePublicId;
         if (!string.IsNullOrWhiteSpace(backSource))
         {
             var movedBack = await _cloudinary.MoveAsync(backSource, targetFolder, cancellationToken);
@@ -320,6 +457,8 @@ public class OcrService : IOcrService
     private async Task EnsureDocumentNumberAvailableAsync(DocumentType type, string documentNumber, CancellationToken cancellationToken)
     {
         var normalized = NormalizationHelpers.NormalizeDocumentNumber(type, documentNumber);
+        // BR-11: the (DocumentType, DocumentNumber) pair is unique across the WHOLE
+        // system, not per user - same rule as the manual create flow.
         var exists = await _db.IdentityDocuments
             .AnyAsync(d => d.DocumentType == type && d.DocumentNumber == normalized, cancellationToken);
 
@@ -330,11 +469,62 @@ public class OcrService : IOcrService
     }
 
     /// <summary>
+    /// Makes sure a temporary public id really lives in the temporary folder of the given
+    /// scan (BR-15). Temporary ids look like
+    /// <c>{root}/tmp/{scanId}/{side}-{hash}</c>.
+    /// </summary>
+    internal static void EnsureBelongsToScan(string publicId, Guid scanId, string fieldName)
+    {
+        var segments = publicId
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        // The folder segment "tmp" must be directly followed by the scan id. Comparing
+        // segment by segment (instead of matching a substring) makes the check immune
+        // to a missing root folder and to a scan id appearing in another position.
+        var scanIdTexts = new[] { scanId.ToString("D"), scanId.ToString("N") };
+
+        var belongs = segments
+            .Select((segment, index) => (segment, index))
+            .Any(x => x.segment.Equals("tmp", StringComparison.OrdinalIgnoreCase)
+                      && x.index + 1 < segments.Length
+                      && scanIdTexts.Contains(segments[x.index + 1], StringComparer.OrdinalIgnoreCase));
+
+        if (!belongs)
+        {
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                [fieldName] = new[] { "Ảnh không thuộc phiên quét này." }
+            });
+        }
+    }
+
+    /// <summary>
+    /// Checks that an asset still exists on Cloudinary. The temporary images may have been
+    /// deleted by the cleanup job in the meantime.
+    /// </summary>
+    private async Task<bool> AssetExistsAsync(string publicId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var downloaded = await _cloudinary.DownloadAsync(publicId, cancellationToken);
+            return downloaded is not null;
+        }
+        catch (Exception ex)
+        {
+            // A transport error must not block the confirmation - the move below will
+            // fail with a proper error message if the asset is really gone.
+            _logger.LogWarning(ex, "Could not verify the existence of Cloudinary asset {PublicId}.", publicId);
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Validates the image content (size, magic bytes, dimensions) and enforces the
     /// OCR-specific size limit.
     /// </summary>
     private async Task ValidateImageAsync(
-        Microsoft.AspNetCore.Http.IFormFile file,
+        Microsoft.AspNetCore.Http.IFormFile? file,
         string side,
         CancellationToken cancellationToken)
     {

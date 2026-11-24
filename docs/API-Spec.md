@@ -95,6 +95,11 @@ Quy ước:
 | 9 | DELETE | `/users/{userId}/identity-documents/{documentId}` | Xóa giấy tờ và ảnh |
 | 10 | GET | `/users/{userId}/identity-documents/{documentId}/images/{side}` | Lấy ảnh |
 | 11 | GET | `/users/{userId}/identity-documents/{documentId}` | Chi tiết một giấy tờ |
+| 12 | POST | `/users/{userId}/identity-documents/ocr/scan` | Quét OCR giấy tờ (cần User tồn tại) |
+| 12b | POST | `/identity-documents/ocr/preview` | Xem trước OCR — không cần User, không ghi DB |
+| 13 | POST | `/users/{userId}/identity-documents/ocr/confirm` | Xác nhận giấy tờ đã quét |
+
+> API-12, API-12b, API-13 được đặc tả chi tiết trong `docs/OCR-Cloudinary-Spec.md` §5.
 
 ## 3. Chi tiết endpoint
 

@@ -57,6 +57,13 @@ public class IdentityDocumentFormViewModel
     [Display(Name = "Ảnh mặt sau")]
     public IFormFile? BackImage { get; set; }
 
+    /// <summary>
+    /// The id of the OCR scan that produced the pre-filled values. When it is set, the
+    /// form is submitted through API-13 (OCR confirm) so the temporary images are
+    /// promoted to their permanent location instead of being uploaded a second time.
+    /// </summary>
+    public Guid? OcrScanId { get; set; }
+
     /// <summary>URL of the current front image (used as preview in edit mode).</summary>
     public string? ExistingFrontImageUrl { get; set; }
 

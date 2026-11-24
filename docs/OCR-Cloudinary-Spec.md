@@ -1,4 +1,4 @@
-# OCR & Cloudinary Specification – User Management
+﻿# OCR & Cloudinary Specification – User Management
 
 - **Mã tài liệu:** SPEC-OCR-CLD-001
 - **Phiên bản:** v1.0
@@ -529,6 +529,56 @@ Base URL: `https://{host}/api/v1`
 > `503` khi PaddleOCR service không sẵn sàng — người dùng vẫn có thể nhập tay và
 > lưu bình thường. OCR là **tùy chọn**, không phải điều kiện để lưu giấy tờ.
 
+### API-12b – Xem trước OCR (không cần User tồn tại)
+
+`POST /identity-documents/ocr/preview`
+
+> **Vì sao cần endpoint này?** API-12 gắn `UserId` bắt buộc (FK tới `Users`) vì
+> `OcrExtractionResult.UserId` và `IdentityDocument.UserId` đều là khóa ngoại bắt
+> buộc. Nhưng luồng **Thêm User nhanh (Quick Create)** cần điền sẵn form *trước khi*
+> User tồn tại. API-12b là bản rút gọn, **không phụ thuộc User**: không tạo bản ghi
+> scan, không lưu ảnh tạm lên Cloudinary, chỉ trả về các field đã nhận diện để
+> form pre-fill.
+
+`Content-Type: multipart/form-data`
+
+| Field | Kiểu | Bắt buộc | Mô tả |
+|---|---|---|---|
+| `documentType` | string | Có | `CCCD`, `CMND`, `Passport` |
+| `frontImage` | file | Có | Ảnh mặt trước |
+| `backImage` | file | Với CCCD/CMND | Ảnh mặt sau |
+
+**Luồng xử lý (Server):**
+
+```text
+1.  Validate multipart + kích thước tổng request      → 413 nếu vượt
+2.  Validate từng ảnh (magic bytes, kích thước, pixel) → 415 / 400
+3.  Gọi PaddleOCR service trực tiếp (timeout 30s)      → 503 nếu service lỗi
+4.  Chuẩn hóa + validate kết quả OCR                   → bỏ field không hợp lệ
+5.  KHÔNG upload Cloudinary, KHÔNG ghi OcrExtractionResult
+6.  Trả 200 với fields + warnings
+```
+
+**Response `200`:**
+
+```json
+{
+  "documentType": "CCCD",
+  "fields": {
+    "documentNumber": { "value": "079095001234", "confidence": 0.98, "source": "front", "isValid": true },
+    "fullName":     { "value": "Nguyễn Văn A", "confidence": 0.95, "source": "front", "isValid": true },
+    "dateOfBirth":  { "value": "1995-04-20",  "confidence": 0.93, "source": "front", "isValid": true }
+  },
+  "warnings": ["Không đọc rõ 'Địa chỉ' — độ tin cậy 78%, vui lòng kiểm tra."],
+  "processingTimeMs": 1247
+}
+```
+
+**Status:** `200`, `400`, `413`, `415`, `503`.
+
+> Không có `404` (không cần User) và không có `409`. Vì không ghi ảnh xuống
+> Cloudinary nên **không sinh rác** và không cần job dọn dẹp cho endpoint này.
+
 ### API-13 – Xác nhận giấy tờ đã quét
 
 `POST /users/{userId}/identity-documents/ocr/confirm`
@@ -541,9 +591,7 @@ Base URL: `https://{host}/api/v1`
   "documentType": "CCCD",
   "documentNumber": "079095001234",
   "issuedDate": "2021-05-10",
-  "expiryDate": "2036-04-20",
-  "frontImagePublicId": "user-management/tmp/9a1c.../front-abc.jpg",
-  "backImagePublicId": "user-management/tmp/9a1c.../back-def.jpg"
+  "expiryDate": "2036-04-20"
 }
 ```
 
@@ -551,20 +599,31 @@ Base URL: `https://{host}/api/v1`
 
 ```text
 1.  Kiểm tra scanId tồn tại và thuộc User
-2.  Kiểm tra ảnh tạm tồn tại trên Cloudinary
-3.  Validate metadata theo BR-08, BR-10
-4.  Kiểm tra trùng (loại giấy tờ, số giấy tờ)
-5.  Tạo documentId
-6.  Copy ảnh tạm → folder identity-documents/{userId}/{documentId}
-7.  Ghi IdentityDocument trong transaction
-8.  Commit
-9.  Xóa ảnh tạm (best-effort)
-10. Cập nhật OcrExtractionResult.status = Confirmed
+2.  Lấy publicId ảnh tạm từ BẢN GHI OcrExtractionResult (KHÔNG lấy từ client)
+3.  Kiểm tra publicId nằm trong folder tmp/{scanId} của đúng scan này
+4.  Kiểm tra ảnh tạm vẫn tồn tại trên Cloudinary
+5.  Kiểm tra quy tắc ảnh theo loại giấy tờ (CCCD/CMND cần mặt sau, Passport không được có)
+6.  Validate metadata theo BR-08, BR-10
+7.  Kiểm tra trùng (loại giấy tờ, số giấy tờ)
+8.  Tạo documentId
+9.  Move ảnh tạm → folder identity-documents/{userId}/{documentId}
+10. Ghi IdentityDocument + đánh dấu scan = Confirmed
+11. Nếu ghi DB lỗi → xóa ảnh vừa move (best-effort) rồi trả lỗi
 ```
 
 **Response `201`:** representation giấy tờ — giống hệt API-07.
 
 **Status:** `201`, `400`, `404`, `409`, `413`, `415`.
+
+#### Ràng buộc bảo mật của API-13
+
+| Ràng buộc | Cách thực hiện |
+|---|---|
+| Client KHÔNG được chỉ định ảnh nào được dùng | `OcrConfirmRequest` không có `frontImagePublicId` / `backImagePublicId`. Public id lấy từ bản ghi `OcrExtractionResult` trong DB. |
+| Ảnh phải thuộc đúng scan | `EnsureBelongsToScan` kiểm tra segment `tmp` đứng ngay trước `{scanId}` (chấp nhận cả định dạng `D` và `N`). |
+| Ảnh phải còn tồn tại | `AssetExistsAsync` gọi Cloudinary trước khi move. |
+| Quy tắc ảnh theo loại giấy tờ | CCCD/CMND bắt buộc có mặt sau; Passport không được có mặt sau. |
+| Số giấy tờ trùng toàn hệ thống | BR-11: `(DocumentType, DocumentNumber)` unique toàn hệ thống, không phải theo user. |
 
 ### 5.1. Thay đổi cho API-07, API-08, API-09, API-10
 

@@ -1,0 +1,325 @@
+@model UserManagement.Web.ViewModels.Users.QuickCreateUserViewModel
+@{
+    ViewData["Title"] = "Thêm User nhanh";
+    var fieldErr = (string apiField) => Model.GetFieldError(apiField);
+    var ocr = Model.Ocr;
+    var min = Model.OcrMinConfidence;
+    var high = Model.OcrHighConfidence;
+}
+
+<a asp-action="Index" class="breadcrumb">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+         stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    Người dùng
+</a>
+
+<div class="page-head">
+    <h1 class="page-title text-balance">@Model.Title</h1>
+    <p class="page-subtitle">
+        Tạo hồ sơ người dùng nhanh chóng — nhập tay hoặc quét CCCD để điền tự động.
+        Quét CCCD là tùy chọn, không phải điều kiện bắt buộc để tạo User.
+    </p>
+</div>
+
+<div class="card max-w-4xl">
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data" asp-action="QuickCreate"
+              class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5" novalidate
+              data-quick-create
+              data-ocr-preview-url="@Url.Action("QuickCreateOcrPreview", "Users")">
+            @Html.AntiForgeryToken()
+            <input type="hidden" asp-for="ReturnUrl" />
+            <input type="hidden" asp-for="Mode" data-quick-mode />
+
+            @* ---------- 1. Choose the input method ---------- *@
+            <div class="md:col-span-2">
+                <p class="label">Chọn phương thức nhập</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" aria-label="Phương thức nhập thông tin">
+                    <button type="button" class="qc-mode-card" data-mode-option="manual"
+                            role="radio" aria-checked="@(Model.IsOcrMode ? "false" : "true")"
+                            aria-pressed="@(Model.IsOcrMode ? "false" : "true")">
+                        <span class="qc-mode-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                            </svg>
+                        </span>
+                        <span class="min-w-0 flex-1">
+                            <span class="qc-mode-title">Nhập thủ công</span>
+                            <span class="qc-mode-sub">Tự điền thông tin người dùng</span>
+                        </span>
+                        <span class="qc-mode-state" data-mode-state>Đang chọn</span>
+                    </button>
+
+                    <button type="button" class="qc-mode-card" data-mode-option="ocr"
+                            role="radio" aria-checked="@(Model.IsOcrMode ? "true" : "false")"
+                            aria-pressed="@(Model.IsOcrMode ? "true" : "false")">
+                        <span class="qc-mode-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+                                <path d="M7 8h10M7 12h6" />
+                            </svg>
+                        </span>
+                        <span class="min-w-0 flex-1">
+                            <span class="qc-mode-title">Quét CCCD</span>
+                            <span class="qc-mode-sub">OCR tự nhận diện thông tin giấy tờ</span>
+                        </span>
+                        <span class="qc-mode-state" data-mode-state>Chọn phương thức</span>
+                    </button>
+                </div>
+            </div>
+
+            @* ---------- 2. OCR branch: upload the CCCD images ---------- *@
+            <div class="md:col-span-2" data-ocr-branch hidden>
+                <div class="section-heading">
+                    <span class="section-heading-icon" aria-hidden="true">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                             stroke-linecap="round" stroke-linejoin="round">
+                            <rect width="18" height="18" x="3" y="3" rx="2" /><circle cx="9" cy="9" r="2" />
+                            <path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21" />
+                        </svg>
+                    </span>
+                    <h2 class="section-heading-text">Tải ảnh CCCD</h2>
+                    <span class="divider flex-1"></span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                    <div>
+                        <label asp-for="FrontImage" class="label">
+                            Ảnh mặt trước <span class="text-red-500" aria-hidden="true">*</span>
+                        </label>
+                        <input asp-for="FrontImage" type="file" accept="image/jpeg,image/png" class="field"
+                               data-ocr-image="front" data-preview-target="qc-front-preview" />
+                        <img data-preview-for="FrontImage" id="qc-front-preview" class="doc-thumb mt-3 hidden"
+                             alt="Xem trước ảnh mặt trước" />
+                        <p class="help-text">Chỉ nhận JPG hoặc PNG, dung lượng tối đa 5 MB.</p>
+                    </div>
+
+                    <div data-ocr-back-section>
+                        <label asp-for="BackImage" class="label">
+                            Ảnh mặt sau <span class="text-red-500" aria-hidden="true">*</span>
+                        </label>
+                        <input asp-for="BackImage" type="file" accept="image/jpeg,image/png" class="field"
+                               data-ocr-image="back" data-preview-target="qc-back-preview" />
+                        <img data-preview-for="BackImage" id="qc-back-preview" class="doc-thumb mt-3 hidden"
+                             alt="Xem trước ảnh mặt sau" />
+                        <p class="help-text">Bắt buộc với CCCD/CMND.</p>
+                    </div>
+                </div>
+
+                <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <button type="button" class="btn btn-secondary" data-ocr-preview-btn disabled
+                            title="Vui lòng chọn đủ ảnh mặt trước và mặt sau">
+                        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                             stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+                            <path d="M7 8h10M7 12h6" />
+                        </svg>
+                        <span data-ocr-preview-label>Bắt đầu nhận diện OCR</span>
+                    </button>
+                    <p class="help-text !mt-0" data-ocr-status role="status" aria-live="polite"></p>
+                </div>
+
+                @* ---------- OCR result panel ---------- *@
+                <div class="mt-4" data-ocr-panel-host>
+                    @await Html.PartialAsync("../Documents/_OcrResultPanel", new UserManagement.Web.ViewModels.Users.IdentityDocumentFormViewModel
+                    {
+                        Ocr = ocr is null ? null : new OcrScanViewModel
+                        {
+                            Fields = ocr.Fields,
+                            Warnings = ocr.Warnings,
+                            ProcessingTimeMs = ocr.ProcessingTimeMs
+                        },
+                        OcrMinConfidence = min,
+                        OcrHighConfidence = high
+                    })
+                </div>
+            </div>
+
+            @* ---------- 3. Basic user info ---------- *@
+            <div class="md:col-span-2">
+                <div class="section-heading">
+                    <span class="section-heading-icon" aria-hidden="true">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                             stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="8" r="4" /><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+                        </svg>
+                    </span>
+                    <h2 class="section-heading-text">Thông tin cơ bản</h2>
+                    <span class="divider flex-1"></span>
+                </div>
+            </div>
+
+            <div class="md:col-span-2">
+                <label asp-for="FullName" class="label">
+                    Họ và tên <span class="text-red-500" aria-hidden="true">*</span>
+                </label>
+                <div class="input-group">
+                    <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="8" r="4" /><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+                    </svg>
+                    <input asp-for="FullName" class="field" placeholder="Nguyễn Văn A"
+                           autocomplete="name" data-ocr-field="fullName" />
+                </div>
+                @if (fieldErr("fullName") is string fnErr)
+                {
+                    <p class="error-text"><span>@fnErr</span></p>
+                }
+                <span asp-validation-for="FullName" class="error-text"></span>
+            </div>
+
+            <div>
+                <label asp-for="Email" class="label">
+                    Email <span class="text-red-500" aria-hidden="true">*</span>
+                </label>
+                <div class="input-group">
+                    <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <rect width="20" height="16" x="2" y="4" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                    </svg>
+                    <input asp-for="Email" type="email" class="field" placeholder="email@example.com"
+                           autocomplete="email" />
+                </div>
+                @if (fieldErr("email") is string emErr)
+                {
+                    <p class="error-text"><span>@emErr</span></p>
+                }
+                <span asp-validation-for="Email" class="error-text"></span>
+            </div>
+
+            <div>
+                <label asp-for="PhoneNumber" class="label">
+                    Số điện thoại <span class="text-red-500" aria-hidden="true">*</span>
+                </label>
+                <div class="input-group">
+                    <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z" />
+                    </svg>
+                    <input asp-for="PhoneNumber" type="tel" class="field" placeholder="0901234567"
+                           autocomplete="tel" />
+                </div>
+                @if (fieldErr("phoneNumber") is string phErr)
+                {
+                    <p class="error-text"><span>@phErr</span></p>
+                }
+                <span asp-validation-for="PhoneNumber" class="error-text"></span>
+            </div>
+
+            <div>
+                <label asp-for="DateOfBirth" class="label">Ngày sinh</label>
+                <input asp-for="DateOfBirth" type="date" class="field" autocomplete="bday"
+                       data-ocr-field="dateOfBirth"
+                       max="@DateTime.UtcNow.Date.ToString("yyyy-MM-dd")" />
+                @if (fieldErr("dateOfBirth") is string dobErr)
+                {
+                    <p class="error-text"><span>@dobErr</span></p>
+                }
+                <span asp-validation-for="DateOfBirth" class="error-text"></span>
+            </div>
+
+            <div>
+                <label asp-for="Gender" class="label">Giới tính</label>
+                <select asp-for="Gender" class="field" data-ocr-field="gender">
+                    <option value="">— Chưa chọn —</option>
+                    <option value="male">Nam</option>
+                    <option value="female">Nữ</option>
+                    <option value="other">Khác</option>
+                </select>
+                <span asp-validation-for="Gender" class="error-text"></span>
+            </div>
+
+            <div class="md:col-span-2">
+                <label asp-for="Address" class="label">Địa chỉ</label>
+                <textarea asp-for="Address" rows="2" class="field" autocomplete="street-address"
+                          data-ocr-field="address"
+                          placeholder="Số nhà, đường, phường/xã, quận/huyện, tỉnh/thành phố"></textarea>
+                <p class="help-text">Không bắt buộc — có thể bổ sung sau.</p>
+                <span asp-validation-for="Address" class="error-text"></span>
+            </div>
+
+            @* ---------- 4. Identity document fields (OCR branch) ---------- *@
+            <div class="md:col-span-2" data-ocr-document-fields hidden>
+                <div class="section-heading">
+                    <span class="section-heading-icon" aria-hidden="true">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                             stroke-linecap="round" stroke-linejoin="round">
+                            <rect width="18" height="14" x="3" y="5" rx="2" /><circle cx="9" cy="11" r="2" />
+                            <path d="M15 11h3M15 14h3" />
+                        </svg>
+                    </span>
+                    <h2 class="section-heading-text">Thông tin giấy tờ</h2>
+                    <span class="divider flex-1"></span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5 mt-4">
+                    <div>
+                        <label asp-for="DocumentType" class="label">Loại giấy tờ</label>
+                        <select asp-for="DocumentType" class="field" data-doc-type>
+                            <option value="CCCD">CCCD — Căn cước công dân</option>
+                            <option value="CMND">CMND — Chứng minh nhân dân</option>
+                            <option value="Passport">Passport — Hộ chiếu</option>
+                        </select>
+                        <p class="help-text">Passport chỉ cần ảnh mặt trước.</p>
+                    </div>
+
+                    <div>
+                        <label asp-for="DocumentNumber" class="label">
+                            Số giấy tờ <span class="text-red-500" aria-hidden="true">*</span>
+                        </label>
+                        <input asp-for="DocumentNumber" class="field font-mono" placeholder="001234567890"
+                               data-ocr-field="documentNumber" />
+                        <span asp-validation-for="DocumentNumber" class="error-text"></span>
+                    </div>
+
+                    <div>
+                        <label asp-for="IssuedDate" class="label">Ngày cấp</label>
+                        <input asp-for="IssuedDate" type="date" class="field" data-ocr-field="issuedDate" />
+                        <span asp-validation-for="IssuedDate" class="error-text"></span>
+                    </div>
+
+                    <div>
+                        <label asp-for="ExpiryDate" class="label">Ngày hết hạn</label>
+                        <input asp-for="ExpiryDate" type="date" class="field" data-ocr-field="expiryDate" />
+                        <span asp-validation-for="ExpiryDate" class="error-text"></span>
+                    </div>
+                </div>
+            </div>
+
+            @* ---------- General error ---------- *@
+            @if (!string.IsNullOrEmpty(Model.GeneralError))
+            {
+                <div class="md:col-span-2 alert alert-danger" role="alert">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
+                    </svg>
+                    <p class="flex-1">@Model.GeneralError</p>
+                </div>
+            }
+
+            @* ---------- Actions ---------- *@
+            <div class="md:col-span-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end pt-2 mt-1 border-t border-surface-200 dark:border-ink-800">
+                <a asp-action="Index" asp-route-returnUrl="@Model.ReturnUrl" class="btn btn-secondary w-full sm:w-auto">
+                    Hủy bỏ
+                </a>
+                <button type="submit" class="btn btn-primary w-full sm:w-auto" data-quick-submit>
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+                    @Model.SubmitText
+                </button>
+            </div>
+
+            <p class="md:col-span-2 help-text">
+                * Trường bắt buộc được xác định theo quy tắc backend hiện tại.
+            </p>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    @await Html.PartialAsync("_ValidationScriptsPartial")
+    <script src="~/js/quick-create-user.js" asp-append-version="true"></script>
+}

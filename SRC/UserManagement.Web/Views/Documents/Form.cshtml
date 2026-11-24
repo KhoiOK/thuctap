@@ -36,6 +36,9 @@
     <input type="hidden" asp-for="UserId" />
     @if (Model.IsEdit) { <input type="hidden" asp-for="DocumentId" /> }
     <input type="hidden" asp-for="ReturnUrl" />
+    @* The scan id makes the form submit through API-13 (OCR confirm) instead of
+       API-07, so the temporary images are promoted rather than uploaded twice. *@
+    <input type="hidden" asp-for="OcrScanId" data-ocr-scan-id />
 
     @* ---------- Document info ---------- *@
     <div class="section-heading">

@@ -25,11 +25,22 @@
             }
         </p>
     </div>
-    <a asp-action="Create" class="btn btn-primary shrink-0">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
-             stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
-        Thêm người dùng
-    </a>
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center shrink-0">
+        <a asp-action="QuickCreate" class="btn btn-secondary w-full sm:w-auto"
+           title="Tạo nhanh bằng nhập tay hoặc quét CCCD">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                 stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+                <path d="M7 8h10M7 12h6" />
+            </svg>
+            Thêm User nhanh
+        </a>
+        <a asp-action="Create" class="btn btn-primary w-full sm:w-auto">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                 stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+            Thêm người dùng
+        </a>
+    </div>
 </div>
 
 @* ---------------- Stats (only when a result set exists) ---------------- *@

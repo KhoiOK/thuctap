@@ -76,6 +76,18 @@ public interface IUsersApiClient
     /// <summary>Confirms a scan and creates the identity document from it (API-13).</summary>
     Task<ApiResult<IdentityDocumentListItemDto>> ConfirmOcrAsync(
         Guid userId, OcrConfirmRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Previews the OCR result of the given images WITHOUT requiring a user and without
+    /// persisting anything (API-12b). Used by the Quick Create flow to pre-fill the user
+    /// form before the user record exists. Returns <c>null</c> when the OCR service is
+    /// unavailable or the images could not be read - the caller then keeps the manual
+    /// entry flow.
+    /// </summary>
+    Task<OcrPreviewResponseDto?> PreviewOcrAsync(
+        string documentType,
+        IFormFile? frontImage, IFormFile? backImage,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -218,17 +230,38 @@ public class UsersApiClient : IUsersApiClient
         try
         {
             var response = await _client.HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            if (!response.IsSuccessStatusCode)
+
+            // 304 Not Modified is a SUCCESS for a conditional request, but
+            // HttpResponseMessage.IsSuccessStatusCode is false for it (only 2xx counts).
+            // Treating it as an error made the proxy answer 404 instead of 304 and
+            // dropped the ETag/Last-Modified headers along the way.
+            if (response.StatusCode != HttpStatusCode.NotModified && !response.IsSuccessStatusCode)
             {
                 response.Dispose();
                 return null;
             }
+
+            if (response.StatusCode == HttpStatusCode.NotModified)
+            {
+                // No body to stream - but the validators must survive so the controller
+                // can send them back to the browser.
+                var notModified = new HttpResponseMessage(HttpStatusCode.NotModified)
+                {
+                    Version = response.Version
+                };
+                CopyResponseHeaders(response, notModified);
+                response.Dispose();
+                return notModified;
+            }
+
             // Detach the response from the HttpClient lifetime so the controller can stream it.
-            return new HttpResponseMessage(response.StatusCode)
+            var result = new HttpResponseMessage(response.StatusCode)
             {
                 Content = new StreamContent(await response.Content.ReadAsStreamAsync(cancellationToken)),
                 Version = response.Version
             };
+            CopyResponseHeaders(response, result);
+            return result;
         }
         catch (HttpRequestException ex)
         {
@@ -242,6 +275,35 @@ public class UsersApiClient : IUsersApiClient
         }
     }
 
+    /// <summary>
+    /// Copies the caching validators (ETag, Last-Modified, Cache-Control) and the content
+    /// type from the API response to the response we hand back to the MVC controller.
+    /// </summary>
+    private static void CopyResponseHeaders(HttpResponseMessage source, HttpResponseMessage target)
+    {
+        if (source.Headers.ETag is not null)
+        {
+            target.Headers.ETag = source.Headers.ETag;
+        }
+
+        // Last-Modified is a content header; Cache-Control is a response header.
+        if (source.Content.Headers.LastModified is { } lastModified)
+        {
+            target.Content.Headers.LastModified = lastModified;
+        }
+        if (source.Headers.CacheControl is { } cacheControl)
+        {
+            target.Headers.CacheControl = cacheControl;
+        }
+
+        // The content type must survive too - the API serves JPEG *and* PNG, and a
+        // mislabelled image would be rendered (or rejected) by the browser.
+        if (source.Content.Headers.ContentType is { } contentType && target.Content is not null)
+        {
+            target.Content.Headers.ContentType = contentType;
+        }
+    }
+
     // ============== OCR ==============
 
     public async Task<OcrScanResponseDto?> ScanOcrAsync(
@@ -249,21 +311,7 @@ public class UsersApiClient : IUsersApiClient
         IFormFile? frontImage, IFormFile? backImage,
         CancellationToken cancellationToken = default)
     {
-        using var form = new MultipartFormDataContent();
-        form.Add(new StringContent(documentType), "documentType");
-
-        if (frontImage is { Length: > 0 })
-        {
-            var content = new StreamContent(frontImage.OpenReadStream());
-            content.Headers.ContentType = new MediaTypeHeaderValue(frontImage.ContentType ?? "application/octet-stream");
-            form.Add(content, "frontImage", frontImage.FileName ?? "front.jpg");
-        }
-        if (backImage is { Length: > 0 })
-        {
-            var content = new StreamContent(backImage.OpenReadStream());
-            content.Headers.ContentType = new MediaTypeHeaderValue(backImage.ContentType ?? "application/octet-stream");
-            form.Add(content, "backImage", backImage.FileName ?? "back.jpg");
-        }
+        using var form = BuildOcrForm(documentType, frontImage, backImage);
 
         HttpResponseMessage response;
         try
@@ -299,6 +347,74 @@ public class UsersApiClient : IUsersApiClient
                 return null;
             }
         }
+    }
+
+    public async Task<OcrPreviewResponseDto?> PreviewOcrAsync(
+        string documentType,
+        IFormFile? frontImage, IFormFile? backImage,
+        CancellationToken cancellationToken = default)
+    {
+        using var form = BuildOcrForm(documentType, frontImage, backImage);
+
+        HttpResponseMessage response;
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, "api/v1/identity-documents/ocr/preview")
+            {
+                Content = form
+            };
+            response = await _client.HttpClient.SendAsync(request, cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "Transport error during the OCR preview.");
+            throw new ApiTransportException("Không thể kết nối tới máy chủ API.", ex);
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var problem = await TryReadProblemAsync(response, cancellationToken);
+                _logger.LogWarning("OCR preview failed with status {Status}: {Title}", (int)response.StatusCode, problem?.Title);
+                return null;
+            }
+
+            try
+            {
+                return await response.Content.ReadFromJsonAsync<OcrPreviewResponseDto>(JsonOpts, cancellationToken);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse the OCR preview response.");
+                return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds the multipart payload shared by API-12 (scan) and API-12b (preview).
+    /// </summary>
+    private static MultipartFormDataContent BuildOcrForm(
+        string documentType, IFormFile? frontImage, IFormFile? backImage)
+    {
+        var form = new MultipartFormDataContent();
+        form.Add(new StringContent(documentType), "documentType");
+
+        if (frontImage is { Length: > 0 })
+        {
+            var content = new StreamContent(frontImage.OpenReadStream());
+            content.Headers.ContentType = new MediaTypeHeaderValue(frontImage.ContentType ?? "application/octet-stream");
+            form.Add(content, "frontImage", frontImage.FileName ?? "front.jpg");
+        }
+        if (backImage is { Length: > 0 })
+        {
+            var content = new StreamContent(backImage.OpenReadStream());
+            content.Headers.ContentType = new MediaTypeHeaderValue(backImage.ContentType ?? "application/octet-stream");
+            form.Add(content, "backImage", backImage.FileName ?? "back.jpg");
+        }
+
+        return form;
     }
 
     public async Task<ApiResult<IdentityDocumentListItemDto>> ConfirmOcrAsync(

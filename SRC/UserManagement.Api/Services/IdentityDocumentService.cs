@@ -132,26 +132,44 @@ public class IdentityDocumentService : IIdentityDocumentService
         int backWidth = 0;
         int backHeight = 0;
 
-        if (frontValidated is not null)
-        {
-            await using var frontStream = request.FrontImage!.OpenReadStream();
-            var uploaded = await _cloudinary.UploadAsync(
-                folder, "front", frontStream, frontValidated.ContentType!, cancellationToken);
-            frontPublicId = uploaded.PublicId;
-            frontVersion = uploaded.Version;
-            frontWidth = uploaded.Width;
-            frontHeight = uploaded.Height;
-        }
+        // Every asset uploaded during this call is tracked here. If anything fails
+        // before the database commit, all of them are deleted again - otherwise a
+        // failure while uploading the back image would leave the front image behind
+        // on Cloudinary (an unreferenced, permanently stored copy of a PII document).
+        var uploadedPublicIds = new List<string>();
 
-        if (backValidated is not null)
+        try
         {
-            await using var backStream = request.BackImage!.OpenReadStream();
-            var uploaded = await _cloudinary.UploadAsync(
-                folder, "back", backStream, backValidated.ContentType!, cancellationToken);
-            backPublicId = uploaded.PublicId;
-            backVersion = uploaded.Version;
-            backWidth = uploaded.Width;
-            backHeight = uploaded.Height;
+            if (frontValidated is not null)
+            {
+                await using var frontStream = request.FrontImage!.OpenReadStream();
+                var uploaded = await _cloudinary.UploadAsync(
+                    folder, "front", frontStream, frontValidated.ContentType!, cancellationToken);
+                frontPublicId = uploaded.PublicId;
+                frontVersion = uploaded.Version;
+                frontWidth = uploaded.Width;
+                frontHeight = uploaded.Height;
+                uploadedPublicIds.Add(uploaded.PublicId);
+            }
+
+            if (backValidated is not null)
+            {
+                await using var backStream = request.BackImage!.OpenReadStream();
+                var uploaded = await _cloudinary.UploadAsync(
+                    folder, "back", backStream, backValidated.ContentType!, cancellationToken);
+                backPublicId = uploaded.PublicId;
+                backVersion = uploaded.Version;
+                backWidth = uploaded.Width;
+                backHeight = uploaded.Height;
+                uploadedPublicIds.Add(uploaded.PublicId);
+            }
+        }
+        catch
+        {
+            // The upload of the second image failed (or the first one did) - remove
+            // whatever was already uploaded so no orphan is left behind.
+            await CleanupAssetsAsync(uploadedPublicIds);
+            throw;
         }
 
         var doc = new IdentityDocument
@@ -178,10 +196,10 @@ public class IdentityDocumentService : IIdentityDocumentService
         {
             await _db.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException)
+        catch
         {
             // Concurrent duplicate insert - clean up the assets we just uploaded and re-throw.
-            await CleanupAssetsAsync(new[] { frontPublicId, backPublicId });
+            await CleanupAssetsAsync(uploadedPublicIds);
             throw;
         }
 
@@ -259,45 +277,66 @@ public class IdentityDocumentService : IIdentityDocumentService
         var assetsToCleanupOnFailure = new List<string>();
         var assetsToDeleteOnSuccess = new List<string>();
 
-        if (request.FrontImage is { Length: > 0 })
+        // ---- Validate EVERYTHING before uploading anything ----
+        // The Passport rule ("no back image") used to be checked only after the front
+        // image had already been uploaded, which left the new front image orphaned when
+        // the check failed. Validation must not have side effects, so it all happens here.
+        if (request.BackImage is { Length: > 0 } && doc.DocumentType == DocumentType.Passport)
         {
-            var validated = await ValidateImageContentAsync(request.FrontImage, cancellationToken);
-            await using var src = request.FrontImage.OpenReadStream();
-            var uploaded = await _cloudinary.UploadAsync(
-                folder, "front", src, validated.ContentType!, cancellationToken);
-            assetsToCleanupOnFailure.Add(uploaded.PublicId);
-            if (!string.IsNullOrWhiteSpace(doc.FrontImagePublicId))
+            throw new ValidationException(new Dictionary<string, string[]>
             {
-                assetsToDeleteOnSuccess.Add(doc.FrontImagePublicId);
-            }
-            newFrontPublicId = uploaded.PublicId;
-            newFrontVersion = uploaded.Version;
-            doc.FrontImageWidth = uploaded.Width > 0 ? uploaded.Width : doc.FrontImageWidth;
-            doc.FrontImageHeight = uploaded.Height > 0 ? uploaded.Height : doc.FrontImageHeight;
+                ["backImage"] = new[] { "Passport không được có ảnh mặt sau." }
+            });
         }
 
-        if (request.BackImage is { Length: > 0 })
+        var frontValidated = request.FrontImage is { Length: > 0 }
+            ? await ValidateImageContentAsync(request.FrontImage, cancellationToken)
+            : null;
+
+        var backValidated = request.BackImage is { Length: > 0 }
+            ? await ValidateImageContentAsync(request.BackImage, cancellationToken)
+            : null;
+
+        try
         {
-            if (doc.DocumentType == DocumentType.Passport)
+            if (frontValidated is not null)
             {
-                throw new ValidationException(new Dictionary<string, string[]>
+                await using var src = request.FrontImage!.OpenReadStream();
+                var uploaded = await _cloudinary.UploadAsync(
+                    folder, "front", src, frontValidated.ContentType!, cancellationToken);
+                assetsToCleanupOnFailure.Add(uploaded.PublicId);
+                if (!string.IsNullOrWhiteSpace(doc.FrontImagePublicId))
                 {
-                    ["backImage"] = new[] { "Passport không được có ảnh mặt sau." }
-                });
+                    assetsToDeleteOnSuccess.Add(doc.FrontImagePublicId);
+                }
+                newFrontPublicId = uploaded.PublicId;
+                newFrontVersion = uploaded.Version;
+                doc.FrontImageWidth = uploaded.Width > 0 ? uploaded.Width : doc.FrontImageWidth;
+                doc.FrontImageHeight = uploaded.Height > 0 ? uploaded.Height : doc.FrontImageHeight;
             }
-            var validated = await ValidateImageContentAsync(request.BackImage, cancellationToken);
-            await using var src = request.BackImage.OpenReadStream();
-            var uploaded = await _cloudinary.UploadAsync(
-                folder, "back", src, validated.ContentType!, cancellationToken);
-            assetsToCleanupOnFailure.Add(uploaded.PublicId);
-            if (!string.IsNullOrWhiteSpace(doc.BackImagePublicId))
+
+            if (backValidated is not null)
             {
-                assetsToDeleteOnSuccess.Add(doc.BackImagePublicId);
+                await using var src = request.BackImage!.OpenReadStream();
+                var uploaded = await _cloudinary.UploadAsync(
+                    folder, "back", src, backValidated.ContentType!, cancellationToken);
+                assetsToCleanupOnFailure.Add(uploaded.PublicId);
+                if (!string.IsNullOrWhiteSpace(doc.BackImagePublicId))
+                {
+                    assetsToDeleteOnSuccess.Add(doc.BackImagePublicId);
+                }
+                newBackPublicId = uploaded.PublicId;
+                newBackVersion = uploaded.Version;
+                doc.BackImageWidth = uploaded.Width > 0 ? uploaded.Width : doc.BackImageWidth;
+                doc.BackImageHeight = uploaded.Height > 0 ? uploaded.Height : doc.BackImageHeight;
             }
-            newBackPublicId = uploaded.PublicId;
-            newBackVersion = uploaded.Version;
-            doc.BackImageWidth = uploaded.Width > 0 ? uploaded.Width : doc.BackImageWidth;
-            doc.BackImageHeight = uploaded.Height > 0 ? uploaded.Height : doc.BackImageHeight;
+        }
+        catch
+        {
+            // The second upload failed - remove the assets uploaded so far so no
+            // orphan is left behind on Cloudinary.
+            await CleanupAssetsAsync(assetsToCleanupOnFailure);
+            throw;
         }
 
         doc.DocumentNumber = NormalizationHelpers.NormalizeDocumentNumber(doc.DocumentType, request.DocumentNumber);

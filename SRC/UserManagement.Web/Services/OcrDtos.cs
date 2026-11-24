@@ -37,3 +37,14 @@ public sealed record OcrConfirmRequest(
     [property: JsonPropertyName("documentNumber")] string DocumentNumber,
     [property: JsonPropertyName("issuedDate")] DateOnly? IssuedDate,
     [property: JsonPropertyName("expiryDate")] DateOnly? ExpiryDate);
+
+/// <summary>
+/// Response of API-12b (OCR preview). Mirrors the Backend's <c>OcrPreviewResponse</c>.
+/// It carries the extracted fields but no <c>scanId</c>: a preview is not persisted
+/// and cannot be confirmed - it only pre-fills the Quick Create form.
+/// </summary>
+public sealed record OcrPreviewResponseDto(
+    [property: JsonPropertyName("documentType")] string DocumentType,
+    [property: JsonPropertyName("fields")] IReadOnlyDictionary<string, OcrFieldDto> Fields,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
+    [property: JsonPropertyName("processingTimeMs")] int ProcessingTimeMs);

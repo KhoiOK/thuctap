@@ -60,7 +60,16 @@ public class OcrCleanupService : BackgroundService
         }
     }
 
-    private async Task CleanupExpiredScansAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Removes the temporary images of every scan whose expiry date has passed and
+    /// marks the corresponding records as <see cref="OcrScanStatus.Expired"/>.
+    ///
+    /// A record is only marked as expired when ALL of its assets were deleted
+    /// successfully. If a delete fails, the record keeps its expiry date so the next
+    /// run of the job retries it - marking it as expired while the image is still on
+    /// the CDN would leak the image forever (BR-16).
+    /// </summary>
+    internal async Task CleanupExpiredScansAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -87,23 +96,46 @@ public class OcrCleanupService : BackgroundService
             .Distinct()
             .ToList();
 
+        // Assets that could not be deleted. The records that reference them keep their
+        // expiry date so the next run of this job retries them - marking them as
+        // "Expired" while the image is still on the CDN would leak the image forever
+        // (BR-16: a failed delete must never be silently forgotten).
+        var failedIds = new HashSet<string>(StringComparer.Ordinal);
+
         if (publicIds.Count > 0)
         {
             var failed = await cloudinary.DeleteAsync(publicIds, cancellationToken);
             foreach (var id in failed)
             {
                 _logger.LogWarning("Expired Cloudinary asset {PublicId} could not be deleted.", id);
+                failedIds.Add(id);
             }
         }
 
+        var expiredNow = 0;
         foreach (var record in expired)
         {
+            var recordIds = new[] { record.FrontImagePublicId, record.BackImagePublicId }
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p!)
+                .ToList();
+
+            if (recordIds.Any(id => failedIds.Contains(id)))
+            {
+                // Keep the record and its ExpiresAt so the next run retries the delete.
+                continue;
+            }
+
             record.Status = OcrScanStatus.Expired;
             record.ExpiresAt = null;
+            expiredNow++;
         }
 
         await db.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Cleaned up {Count} expired OCR scan(s).", expired.Count);
+        _logger.LogInformation(
+            "Cleaned up {Count} expired OCR scan(s); {Pending} still pending because their assets could not be deleted.",
+            expiredNow,
+            expired.Count - expiredNow);
     }
 }

@@ -33,16 +33,4 @@ public class OcrConfirmRequest
     public DateOnly? IssuedDate { get; set; }
 
     public DateOnly? ExpiryDate { get; set; }
-
-    /// <summary>
-    /// Temporary public id of the front image. Falls back to the id stored with the scan
-    /// when omitted.
-    /// </summary>
-    public string? FrontImagePublicId { get; set; }
-
-    /// <summary>
-    /// Temporary public id of the back image. Falls back to the id stored with the scan
-    /// when omitted.
-    /// </summary>
-    public string? BackImagePublicId { get; set; }
 }

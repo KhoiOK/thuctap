@@ -38,6 +38,27 @@
     let scanId = null;
     let scanning = false;
 
+    // Hidden field that carries the scan id to the server. When it is filled, the form
+    // is submitted through API-13 (OCR confirm) so the temporary images are promoted
+    // to their permanent folder instead of being uploaded a second time.
+    const scanIdInput = document.querySelector('[data-ocr-scan-id]');
+
+    function setScanId(value) {
+        scanId = value || null;
+        if (scanIdInput) scanIdInput.value = scanId || '';
+    }
+
+    function clearScanId() {
+        setScanId(null);
+        panelHost.innerHTML = '';
+        if (skipBtn) skipBtn.classList.add('hidden');
+        if (label) label.textContent = originalLabel;
+        document.querySelectorAll('[data-ocr-badge]').forEach(function (b) {
+            b.innerHTML = '';
+            b.classList.add('hidden');
+        });
+    }
+
     function isPassport() {
         const type = typeSelect ? typeSelect.value : 'CCCD';
         return type.toLowerCase() === 'passport';
@@ -236,12 +257,12 @@
             const payload = await response.json().catch(function () { return null; });
 
             if (response.ok && payload && payload.ok) {
-                scanId = payload.data.scanId;
+                setScanId(payload.data.scanId);
                 renderPanel(payload.data);
                 if (skipBtn) skipBtn.classList.remove('hidden');
                 Toast.show('Đã quét xong. Vui lòng kiểm tra thông tin trước khi lưu.', 'success');
             } else {
-                scanId = null;
+                clearScanId();
                 const message = (payload && payload.message)
                     ? payload.message
                     : 'Không đọc được thông tin trên ảnh. Bạn vẫn có thể nhập thủ công.';
@@ -250,7 +271,7 @@
                 Toast.show(message, 'error');
             }
         } catch (err) {
-            scanId = null;
+            clearScanId();
             renderEmptyPanel('Không thể kết nối tới máy chủ. Bạn vẫn có thể nhập thủ công.');
             Toast.show('Không thể kết nối tới máy chủ. Vui lòng thử lại.', 'error');
         } finally {
@@ -279,10 +300,7 @@
 
     if (skipBtn) {
         skipBtn.addEventListener('click', function () {
-            scanId = null;
-            panelHost.innerHTML = '';
-            skipBtn.classList.add('hidden');
-            if (label) label.textContent = originalLabel;
+            clearScanId();
         });
     }
 
@@ -290,14 +308,7 @@
         input.addEventListener('change', function () {
             // Đổi ảnh thì kết quả quét cũ không còn đúng.
             if (scanId) {
-                scanId = null;
-                panelHost.innerHTML = '';
-                if (skipBtn) skipBtn.classList.add('hidden');
-                if (label) label.textContent = originalLabel;
-                document.querySelectorAll('[data-ocr-badge]').forEach(function (b) {
-                    b.innerHTML = '';
-                    b.classList.add('hidden');
-                });
+                clearScanId();
             }
             updateScanButton();
         });

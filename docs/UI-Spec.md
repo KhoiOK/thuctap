@@ -71,6 +71,8 @@ Khi gửi form:
 | GET, POST | `/Users/{userId}/Documents/Edit/{documentId}` | SCR-06 | #11, #8 |
 | POST | `/Users/{userId}/Documents/Delete/{documentId}` | SCR-05/action | #9 |
 | GET | `/Users/{userId}/Documents/{documentId}/Image/{side}` | Proxy ảnh | #10 |
+| GET, POST | `/Users/QuickCreate` | SCR-08 | #3, #7 |
+| POST | `/Users/QuickCreate/OcrPreview` | Proxy OCR | #12b |
 
 Trang chủ chuyển hướng đến `/Users`.
 
@@ -301,7 +303,95 @@ Dùng cho xóa User và xóa giấy tờ.
 - Ảnh tải qua route proxy Frontend, route này gọi API-10.
 - Không hiển thị ảnh của giấy tờ/User không tồn tại.
 
-## 9. API client và lỗi giao diện
+## 9. SCR-08 – Thêm User nhanh (Quick Create)
+
+> Đặc tả nguồn: `luong-them-user-nhanh.md` (§2, §3, §6, §10).
+
+### 9.1. Route
+
+| Method | Route | Màn hình | API |
+|---|---|---|---|
+| GET | `/Users/QuickCreate` | SCR-08 | — |
+| POST | `/Users/QuickCreate` | SCR-08 | #3, #7 |
+| POST | `/Users/QuickCreate/OcrPreview` | Proxy OCR | #12b |
+
+Điểm truy cập: nút `+ Thêm User nhanh` trên SCR-01, đặt cạnh nút `Thêm người dùng`.
+
+### 9.2. Hai phương thức nhập
+
+| Phương thức | Mô tả |
+|---|---|
+| `manual` | Người dùng tự nhập thông tin vào form. |
+| `ocr` | Người dùng tải ảnh CCCD, hệ thống nhận diện và điền sẵn form. |
+
+- Quét CCCD là **tùy chọn** — không có OCR vẫn tạo được User (BR-1).
+- Chuyển đổi phương thức chỉ ẩn/hiện khu vực, không xóa dữ liệu đã nhập.
+- Trạng thái phương thức được gửi lên server qua field ẩn `Mode`.
+
+### 9.3. Trường nhập liệu
+
+| Trường | Bắt buộc | Ghi chú |
+|---|---|---|
+| Họ và tên | Có | 2–100 ký tự |
+| Email | Có | Định dạng email, tối đa 255 ký tự |
+| Số điện thoại | Có | `^0[35789][0-9]{8}$` |
+| Ngày sinh | Không | |
+| Giới tính | Không | |
+| Địa chỉ | Không | Tối đa 500 ký tự |
+| Loại giấy tờ | Chỉ ở chế độ OCR | CCCD / CMND / Passport |
+| Số giấy tờ | Chỉ ở chế độ OCR | 6–50 ký tự |
+| Ngày cấp / Ngày hết hạn | Chỉ ở chế độ OCR | Ngày hết hạn ≥ ngày cấp |
+| Ảnh mặt trước / mặt sau | Chỉ ở chế độ OCR | JPG/PNG, mặt sau bắt buộc với CCCD/CMND |
+
+Danh sách trường bắt buộc được đối chiếu với `UserUpsertRequest` và `UserValidator`
+của backend (BR-01..BR-03) — không tự biến trường tùy chọn thành bắt buộc.
+
+### 9.4. Luồng OCR
+
+1. Người dùng chọn đủ ảnh mặt trước (và mặt sau với CCCD/CMND).
+2. Bấm **Bắt đầu nhận diện OCR** → `POST /Users/QuickCreate/OcrPreview` → API-12b.
+3. Hiển thị kết quả trong panel `_OcrResultPanel` để **người dùng kiểm tra** (BR-2).
+4. Field có `confidence ≥ OcrMinConfidence` (mặc định 0.60) được điền sẵn vào form.
+5. Người dùng chỉnh sửa được mọi giá trị trước khi lưu (BR-3).
+6. Không có bước xác nhận OCR riêng — dữ liệu chỉ được lưu khi bấm **Tạo User**.
+
+### 9.5. Luồng lưu (2 bước)
+
+```text
+POST /Users/QuickCreate
+      |
+      v
+Bước 1: POST /api/v1/users                      → tạo User
+      |
+      +-- thất bại --> giữ nguyên dữ liệu form, hiển thị lỗi theo field
+      |
+      v (thành công)
+Bước 2 (chỉ khi Mode = ocr): POST /api/v1/users/{id}/identity-documents
+      |
+      +-- thất bại --> KHÔNG tạo lại User; chuyển tới trang chi tiết kèm
+      |                thông báo "User đã được tạo; giấy tờ chưa được lưu" (BR-7)
+      v (thành công)
+Toast thành công → chuyển tới trang chi tiết User
+```
+
+- Bước 1 luôn chạy trước vì `IdentityDocument.UserId` là khóa ngoại bắt buộc.
+- Validation của **giấy tờ** không được chặn việc tạo User: lỗi giấy tờ được tách
+  riêng và báo ở bước 2.
+- Validation của **User** (bắt buộc, định dạng, trùng lặp) chặn cả hai bước.
+
+### 9.6. Trạng thái và thông báo
+
+| Trạng thái | Hành vi |
+|---|---|
+| Chưa đủ ảnh | Nút OCR disabled, kèm tooltip giải thích. |
+| Đang OCR | Disable nút, hiển thị trạng thái "đang nhận diện". |
+| OCR thất bại | Hiển thị lỗi, cho phép thử lại hoặc nhập tay. |
+| OCR độ tin cậy thấp | Hiển thị cảnh báo, yêu cầu kiểm tra thủ công. |
+| Đang gửi form | Khóa nút **Tạo User** (submit lock) để tránh gửi trùng (BR-5). |
+| Tạo User thất bại | Giữ nguyên dữ liệu form để sửa và thử lại (BR-6). |
+| Tạo User OK, giấy tờ lỗi | Redirect tới trang chi tiết kèm cảnh báo riêng (BR-7). |
+
+## 10. API client và lỗi giao diện
 
 Frontend sử dụng `IHttpClientFactory`.
 
@@ -313,7 +403,7 @@ Frontend sử dụng `IHttpClientFactory`.
 - Nếu lỗi không gắn được với field, hiển thị thông báo chung.
 - Không hiển thị stack trace hoặc nội dung lỗi nội bộ.
 
-## 10. Cấu trúc View đề xuất
+## 11. Cấu trúc View đề xuất
 
 ```text
 UserManagement.Web/
@@ -328,6 +418,7 @@ UserManagement.Web/
       UserDetailViewModel.cs
       UserFormViewModel.cs
       IdentityDocumentFormViewModel.cs
+      QuickCreateUserViewModel.cs
   Views/
     Shared/
       _Layout.cshtml
@@ -340,6 +431,7 @@ UserManagement.Web/
       Details.cshtml
       Create.cshtml
       Edit.cshtml
+      QuickCreate.cshtml
       _UserForm.cshtml
       _IdentityDocumentForm.cshtml
   wwwroot/
@@ -348,9 +440,10 @@ UserManagement.Web/
     js/
       users.js
       identity-documents.js
+      quick-create-user.js
 ```
 
-## 11. Tiêu chí nghiệm thu UI
+## 12. Tiêu chí nghiệm thu UI
 
 - Đủ các route và màn hình theo tài liệu.
 - Tìm kiếm, phân trang và sắp xếp giữ trạng thái.

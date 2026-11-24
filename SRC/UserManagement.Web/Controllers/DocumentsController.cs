@@ -49,10 +49,21 @@ public class DocumentsController : Controller
 
         try
         {
-            var result = await _api.CreateDocumentAsync(
-                userId, vm.DocumentType, vm.DocumentNumber,
-                vm.IssuedDate, vm.ExpiryDate, vm.FrontImage, vm.BackImage,
-                cancellationToken);
+            // When the form was filled by an OCR scan, submit through API-13 so the
+            // temporary images are promoted to their permanent folder. Uploading them
+            // again (API-07) would leave the temporary copies behind until the cleanup
+            // job deletes them, and the scan record would never be marked as confirmed.
+            var result = vm.OcrScanId is { } scanId
+                ? await _api.ConfirmOcrAsync(userId, new OcrConfirmRequest(
+                    scanId,
+                    vm.DocumentType,
+                    vm.DocumentNumber,
+                    vm.IssuedDate,
+                    vm.ExpiryDate), cancellationToken)
+                : await _api.CreateDocumentAsync(
+                    userId, vm.DocumentType, vm.DocumentNumber,
+                    vm.IssuedDate, vm.ExpiryDate, vm.FrontImage, vm.BackImage,
+                    cancellationToken);
 
             if (result.IsSuccess)
             {
@@ -258,19 +269,30 @@ public class DocumentsController : Controller
         var response = await _api.GetDocumentImageAsync(userId, documentId, side, ifNoneMatch, cancellationToken);
         if (response is null) return NotFound();
 
-        // Copy any caching/ETag headers from the API to our proxy response.
-        if (response.Headers.ETag is not null) Response.Headers.ETag = response.Headers.ETag.ToString();
-        if (response.Content.Headers.LastModified is { } lm) Response.Headers.LastModified = lm.ToString("R");
-
+        // The client already has this version - answer 304 and copy the validators
+        // (ETag, Last-Modified, Cache-Control) from the API so the browser can cache.
         if (response.StatusCode == System.Net.HttpStatusCode.NotModified)
         {
+            CopyCachingHeaders(response);
             response.Dispose();
             return StatusCode(StatusCodes.Status304NotModified);
         }
 
+        CopyCachingHeaders(response);
+
         var contentType = response.Content.Headers.ContentType?.ToString() ?? "image/jpeg";
         var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         return File(stream, contentType);
+    }
+
+    /// <summary>
+    /// Copies the caching headers from the API response onto the MVC response.
+    /// </summary>
+    private void CopyCachingHeaders(HttpResponseMessage response)
+    {
+        if (response.Headers.ETag is not null) Response.Headers.ETag = response.Headers.ETag.ToString();
+        if (response.Content.Headers.LastModified is { } lm) Response.Headers.LastModified = lm.ToString("R");
+        if (response.Headers.CacheControl is { } cc) Response.Headers.CacheControl = cc.ToString();
     }
 
     // =================== helpers ===================

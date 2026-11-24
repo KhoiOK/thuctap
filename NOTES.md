@@ -728,3 +728,152 @@ lifecycle phải **poll** thay vì assert ngay, nếu không test sẽ chập ch
 - Toàn bộ suite: **233 test pass** (40 Web + 193 API), 0 fail.
 
 
+
+---
+
+## Phase 8.8 - Sua loi logic theo code review
+
+Ban code review chap 9 muc (4 critical, 4 logic, 1 bao mat). Cac muc duoc xac nhan
+la loi that su trong code da deu da sua va co test. Hai muc khong phai loi:
+muc 8 (thu tu sort co dinh - dung theo yeu cau) va muc 9 (authentication/authorization
+nam ngoai pham vi v1.0 theo SRS 1.2/1.3/6).
+
+### Da sua
+
+| # | Muc | Files | Test |
+|---|---|---|---|
+| 1 | Upload 1 anh that bai -> anh con lai bi orphan tren Cloudinary | IdentityDocumentService | IdentityDocumentServiceCleanupTests |
+| 2 | Validate (Passport khong duoc co anh sau) chay SAU khi da upload | IdentityDocumentService | IdentityDocumentServiceCleanupTests |
+| 3 | IDOR: client tu chon publicId de promote anh bat ky | OcrService, OcrRequests | OcrServiceConfirmTests |
+| 4 | API-13 thieu quy tac anh CCCD/CMND vs Passport | OcrService | OcrServiceConfirmTests |
+| 5 | 304 khong phai success status -> proxy tra 404, mat ETag | UsersApiClient, DocumentsController | DocumentImageProxyTests |
+| 6 | Cleanup job danh Expired ca khi xoa that bai -> anh leak vinh vien | OcrCleanupService | OcrCleanupServiceTests |
+| 7 | API-13 tra 500 do CreatedAtAction sai ten action | IdentityDocumentsOcrController | OcrControllerTests |
+| 8 | Upload/rename/destroy thieu type=authenticated | CloudinaryStorage | CloudinaryStorageTests |
+
+### Chi tiet quan trong
+
+**Muc 3 (IDOR) - muc nang dong.** OcrConfirmRequest da bo FrontImagePublicId va
+BackImagePublicId. Public id chi lay tu ban ghi OcrExtractionResult trong DB,
+roi kiem tra segment 'tmp' dung truoc {scanId}. Cach so sanh theo segment (khong
+phai substring) de tranh scan id xuat hien o vi tri khac trong path.
+
+**Muc 7 - loi moi phat hien khi viet test.** CreatedAtAction nhan TEN ACTION method,
+nhung code truyen TEN ROUTE (GetIdentityDocument); action method that la GetById.
+Link generation that bai -> API-13 tra 500 thay vi 201. Da doi sang CreatedAtRoute
+(dung ten route) nhu UsersController da dung.
+
+**Muc 5.** HttpResponseMessage.IsSuccessStatusCode chi true voi 2xx, nen 304 bi coi
+la loi. Proxy phai kiem tra StatusCode == NotModified rieng, va copy ETag /
+Last-Modified / Cache-Control sang response cua MVC. Da them ca content type - API
+phuc vu ca JPEG lan PNG.
+
+**Muc 6.** Ban ghi scan chi duoc danh Expired khi TAT CA asset da xoa thanh cong.
+Neu xoa that bai, giu nguyen ExpiresAt de lan chay sau thu lai - danh Expired luc
+anh van con tren CDN se leak PII vinh vien.
+
+### Kiem thu
+
+```
+dotnet build: 0 errors
+dotnet test:  265/265 passed (212 API + 53 Web)
+```
+
+
+### Nang cap dependency
+
+SixLabors.ImageSharp 3.1.10 -> **3.2.0** (3.1.10 co advisory GHSA-gwg2-r3hj-4w44 va
+GHSA-j3p4-wp97-rph4 - xem dotnet list package --vulnerable). Ap dung cho API va
+ca 2 project test.
+
+---
+
+## Phase 8.9 – Luong "Them User nhanh" (Quick Create)
+
+Trien khai theo `luong-them-user-nhanh.md` (§2, §3, §6, §10).
+
+### Backend: API-12b (xem truoc OCR khong can User)
+
+| File | Vai tro |
+|---|---|
+| `DTOs/Users/IdentityDocuments/OcrPreviewRequest.cs` | Request multipart |
+| `DTOs/Users/IdentityDocuments/OcrResponses.cs` | `OcrPreviewResponse` |
+| `Services/OcrService.cs` | `PreviewAsync` |
+| `Controllers/IdentityDocumentsOcrPreviewController.cs` | `POST /api/v1/identity-documents/ocr/preview` |
+
+**Quyet dinh kien truc quan (quan trong):** API-12 yeu cau `{userId}` vi
+`OcrExtractionResult.UserId` va `IdentityDocument.UserId` la khoa ngoai bat buoc.
+Nhung Quick Create can dien san form **truoc khi User ton tai**. Vi vay them
+API-12b: chay `IPaddleOcrClient.RecognizeAsync` truc tiep, **khong** upload Cloudinary
+tam, **khong** ghi `OcrExtractionResult`. Khong sinh rac, khong can job don dep.
+
+### Frontend
+
+| File | Vai tro |
+|---|---|
+| `ViewModels/Users/QuickCreateUserViewModel.cs` | Form + `ValidateDocument()` |
+| `Controllers/UsersController.cs` | `QuickCreate` GET/POST + `QuickCreateOcrPreview` |
+| `Views/Users/QuickCreate.cshtml` | Form gocn, 2 the phuong thuc |
+| `Views/Users/Index.cshtml` | Nut `+ Them User nhanh` |
+| `wwwroot/js/quick-create-user.js` | Chuyen mode, preview anh, auto-fill, submit lock |
+| `wwwroot/css/app.src.css` | `.qc-mode-card` |
+
+### Luong luu 2 buoc (BR-7)
+
+```text
+POST /Users/QuickCreate
+   |
+   v
+Buoc 1: POST /api/v1/users                     -> tao User
+   |  that bai: giu form, loi theo field
+   v
+Buoc 2 (Mode = ocr): POST /api/v1/users/{id}/identity-documents
+   |  that bai: KHONG tao lai User -> redirect Details + canh bao
+   v
+Toast -> Details
+```
+
+Bước 1 luôn chạy truoc vi `IdentityDocument.UserId` la khoa ngoai bat buoc.
+
+### Bug: `IValidatableObject` + ModelState khong tach duoc loi giay to
+
+Lần dau implement, validation giay to nam trong `QuickCreateUserViewModel.Validate()`
+(IValidatableObject) -> MVC nhet loi o **model-level key `""`**. Controller phai
+`ExtractDocumentErrors()` de tach loi ra khoi ModelState truoc khi tao User.
+
+Hai van de lam cach do **khong hoat dong** tren .NET 10:
+
+1. `ModelState.Remove(field)` xoa ca entry -> mat thong tin.
+2. Khong phai loi nao cung duoc tach: khi entry co **khong** error message,
+   `errors[field] = []` van duoc gan -> `documentErrors.Count > 0` la `true` ->
+   luon chay nhanh "giay to chua hop le" **du du lieu hoan toan hop le**.
+
+**Cach sua:** tach validation giay to ra khoi `IValidatableObject`:
+
+- `Validate()` chi kiem tra phan **User** (hien giong `yield break`).
+- `ValidateDocument()` la method explicit tra `Dictionary<string, string[]>`.
+- Controller goi `vm.ValidateDocument()` **sau khi** bind, truoc khi tao User.
+
+Kiem chuc dung: `IValidatableObject` khong nen dung cho validation co dieu kien
+theo mode, vi loi duoc luu o key dac biet va rat kho tach.
+
+### Test coverage moi
+
+| Nhom | So test | Noi dung |
+|---|---|---|
+| `OcrServicePreviewTests` (API) | 8 | `PreviewAsync`: format, size, back image, normalize, loi |
+| `QuickCreateUserTests` (Web E2E) | 11 | Manual/OCR mode, preview, partial success, duplicate |
+
+### Build / Test
+
+```
+dotnet build: 0 errors
+dotnet test:  284/284 passed (220 API + 64 Web)
+```
+
+### Tai lieu da cap nhat
+
+- `docs/OCR-Cloudinary-Spec.md` §5 – them API-12b.
+- `docs/API-Spec.md` §2 – them dong 12, 12b, 13 vao bang endpoint.
+- `docs/UI-Spec.md` – them SCR-08, route bang, cau truc View.
+

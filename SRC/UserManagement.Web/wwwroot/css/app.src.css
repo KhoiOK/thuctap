@@ -526,6 +526,42 @@
            bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-400;
   }
 
+  /* ---------------- Quick Create: mode cards ---------------- */
+  .qc-mode-card {
+    @apply flex items-center gap-3 w-full text-left rounded-2xl border border-surface-200
+           dark:border-ink-700 bg-white dark:bg-ink-900/50 px-4 py-3.5
+           transition-all duration-150 ease-spring
+           hover:border-brand-300 dark:hover:border-brand-500/40
+           hover:bg-brand-50/40 dark:hover:bg-ink-800/40;
+  }
+  .qc-mode-card.is-active {
+    @apply border-brand-500 bg-brand-50/70 dark:bg-brand-500/15 dark:border-brand-400;
+    box-shadow: 0 0 0 3px rgb(79 70 229 / 0.10);
+  }
+  .qc-mode-icon {
+    @apply grid place-items-center h-10 w-10 shrink-0 rounded-xl
+           bg-surface-100 text-ink-500 dark:bg-ink-800 dark:text-ink-300
+           transition-colors duration-150;
+  }
+  .qc-mode-icon svg { @apply h-5 w-5; }
+  .qc-mode-card.is-active .qc-mode-icon {
+    @apply bg-brand-600 text-white;
+  }
+  .qc-mode-title {
+    @apply block text-sm font-semibold text-ink-900 dark:text-white;
+  }
+  .qc-mode-sub {
+    @apply block mt-0.5 text-xs text-ink-500 dark:text-ink-400;
+  }
+  .qc-mode-state {
+    @apply shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold whitespace-nowrap
+           bg-surface-100 text-ink-500 dark:bg-ink-800 dark:text-ink-400
+           transition-colors duration-150;
+  }
+  .qc-mode-card.is-active .qc-mode-state {
+    @apply bg-brand-600 text-white;
+  }
+
   /* ---------------- Lightbox ---------------- */
   .lightbox-overlay {
     @apply fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 p-6

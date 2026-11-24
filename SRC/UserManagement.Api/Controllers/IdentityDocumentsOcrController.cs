@@ -75,9 +75,15 @@ public class IdentityDocumentsOcrController : ControllerBase
         CancellationToken cancellationToken)
     {
         var created = await _ocrService.ConfirmAsync(userId, request, cancellationToken);
-        return CreatedAtAction(
+
+        // The Location header must point at the created document. The route NAME is
+        // "GetIdentityDocument" while the action METHOD is called "GetById" - so
+        // CreatedAtRoute (which takes the route name) must be used here. Passing the
+        // route name to CreatedAtAction (which expects the method name) makes the link
+        // generation fail with "No route matches the supplied values" and the endpoint
+        // answers 500 instead of 201.
+        return CreatedAtRoute(
             "GetIdentityDocument",
-            "IdentityDocuments",
             new { userId, documentId = created.Id },
             created);
     }

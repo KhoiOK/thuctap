@@ -34,6 +34,13 @@ public class IntegrationTestHarness : IAsyncLifetime, IDisposable
     private int _apiPort;
     public Uri ApiBaseAddress => new($"http://localhost:{_apiPort}");
 
+    /// <summary>
+    /// Service provider of the Backend API host. Tests that need to inspect the
+    /// database or the Cloudinary double resolve their services from here.
+    /// </summary>
+    public IServiceProvider ApiServices => _apiHost?.Services
+        ?? throw new InvalidOperationException("The API host has not been started yet.");
+
     public WebApplicationFactory<Program> Web { get; private set; } = null!;
     public HttpClient WebClient { get; private set; } = null!;
 
@@ -54,6 +61,9 @@ public class IntegrationTestHarness : IAsyncLifetime, IDisposable
                 ["FileStorage:MaxRequestBodyBytes"] = "11534336",
                 ["FileStorage:MaxPixelSize"] = "8000",
                 ["AllowedOrigins:0"] = "http://localhost:0",
+                ["Ocr:Enabled"] = "true",
+                ["Ocr:BaseUrl"] = "http://localhost:8100",
+                ["Ocr:MinConfidence"] = "0.60",
                 ["Logging:LogLevel:Default"] = "Warning",
                 ["urls"] = $"http://localhost:{_apiPort}"
             })
