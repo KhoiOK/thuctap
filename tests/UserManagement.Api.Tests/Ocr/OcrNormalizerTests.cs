@@ -194,6 +194,35 @@ public class OcrNormalizerTests
     }
 
     [Fact]
+    public void Date_Keeps_The_Side_It_Was_Read_From()
+    {
+        // On the real CCCD the expiry date is printed on the FRONT and the issue date
+        // on the BACK; the date of birth is on the FRONT. The side must survive the
+        // normalization instead of being hard-coded to "Front".
+        var result = Create().Normalize(
+            Extract(
+                ("expiryDate", "20/04/2036", OcrFieldSource.Front),
+                ("issueDate", "10/05/2021", OcrFieldSource.Back),
+                ("dateOfBirth", "20/04/1995", OcrFieldSource.Front)),
+            DocumentType.CCCD);
+
+        result["expiryDate"].Source.Should().Be(OcrFieldSource.Front);
+        result["issueDate"].Source.Should().Be(OcrFieldSource.Back);
+        result["dateOfBirth"].Source.Should().Be(OcrFieldSource.Front);
+    }
+
+    [Fact]
+    public void Date_That_Cannot_Be_Parsed_Keeps_Its_Side()
+    {
+        var result = Create().Normalize(
+            Extract(("expiryDate", "không rõ", OcrFieldSource.Front)),
+            DocumentType.CCCD);
+
+        result["expiryDate"].Value.Should().BeNull();
+        result["expiryDate"].Source.Should().Be(OcrFieldSource.Front);
+    }
+
+    [Fact]
     public void Date_Out_Of_Range_Is_Rejected()
     {
         var result = Create().Normalize(
@@ -215,6 +244,26 @@ public class OcrNormalizerTests
 
         result["address"].Value.Should().HaveLength(500);
         result["address"].IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Text_Fields_Keep_The_Side_They_Were_Read_From()
+    {
+        // The document number, the name and the gender are read from the front, but
+        // the MRZ fallback can deliver the number from the back - the side must not
+        // be hard-coded to "Front" for any field.
+        var result = Create().Normalize(
+            Extract(
+                ("documentNumber", "079095001234", OcrFieldSource.Back),
+                ("fullName", "NGUYỄN VĂN A", OcrFieldSource.Back),
+                ("gender", "Nam", OcrFieldSource.Back),
+                ("address", "12 Lê Lợi", OcrFieldSource.Back)),
+            DocumentType.CCCD);
+
+        result["documentNumber"].Source.Should().Be(OcrFieldSource.Back);
+        result["fullName"].Source.Should().Be(OcrFieldSource.Back);
+        result["gender"].Source.Should().Be(OcrFieldSource.Back);
+        result["address"].Source.Should().Be(OcrFieldSource.Back);
     }
 
     [Fact]

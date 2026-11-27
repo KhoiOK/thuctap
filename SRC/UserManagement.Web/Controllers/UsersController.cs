@@ -273,13 +273,11 @@ public class UsersController : Controller
                 // authority. They are reported on the document step, never on the user.
                 if (documentErrors.Count > 0)
                 {
-                    vm.CreatedUserId = created.Id;
-                    vm.CreatedUserName = created.FullName;
-                    vm.FieldErrors = documentErrors.ToDictionary(kv => kv.Key, kv => kv.Value);
-                    vm.GeneralError = "Người dùng đã được tạo nhưng thông tin giấy tờ chưa hợp lệ. "
-                        + "Vui lòng bổ sung giấy tờ tại trang chi tiết người dùng.";
-                    TempData["Error"] = vm.GeneralError;
-                    return RedirectToAction(nameof(Details), new { id = created.Id, returnUrl = vm.ReturnUrl });
+                    return RedirectToDocumentForm(
+                        created.Id,
+                        vm,
+                        documentErrors.ToDictionary(kv => kv.Key, kv => kv.Value),
+                        invalid: true);
                 }
 
                 var documentResult = await _api.CreateDocumentAsync(
@@ -294,15 +292,15 @@ public class UsersController : Controller
 
                 if (!documentResult.IsSuccess)
                 {
-                    // The user exists - do NOT create it again. Let the user finish the
-                    // document step from the user details page.
-                    vm.CreatedUserId = created.Id;
-                    vm.CreatedUserName = created.FullName;
-                    vm.FieldErrors = documentResult.FieldErrors.ToDictionary(kv => kv.Key, kv => kv.Value);
-                    vm.GeneralError = "Người dùng đã được tạo nhưng giấy tờ chưa được lưu. "
-                        + "Vui lòng bổ sung giấy tờ tại trang chi tiết người dùng.";
-                    TempData["Error"] = vm.GeneralError;
-                    return RedirectToAction(nameof(Details), new { id = created.Id, returnUrl = vm.ReturnUrl });
+                    // The user exists - do NOT create it again. Send the user straight to
+                    // the document form (pre-filled with what they already entered) so
+                    // they can retry without walking through the details page first.
+                    return RedirectToDocumentForm(
+                        created.Id,
+                        vm,
+                        documentResult.FieldErrors,
+                        invalid: false,
+                        failureMessage: documentResult.GetDisplayMessage());
                 }
             }
 
@@ -316,6 +314,43 @@ public class UsersController : Controller
             vm.GeneralError = ex.Message;
         }
         return View(vm);
+    }
+
+    /// <summary>
+    /// Redirects to the identity-document form after the user was created but the
+    /// document step failed (business rule 7).
+    ///
+    /// The user must not be created again, so the flow continues on the document
+    /// form. The values the user already typed are carried over as query parameters
+    /// so nothing has to be re-entered, and the API error is shown on the form.
+    /// </summary>
+    private IActionResult RedirectToDocumentForm(
+        Guid userId,
+        QuickCreateUserViewModel vm,
+        IReadOnlyDictionary<string, string[]>? fieldErrors,
+        bool invalid,
+        string? failureMessage = null)
+    {
+        var message = invalid
+            ? "Người dùng đã được tạo nhưng thông tin giấy tờ chưa hợp lệ. Vui lòng kiểm tra lại bên dưới."
+            : $"Người dùng đã được tạo nhưng giấy tờ chưa được lưu. Vui lòng thử lại bên dưới"
+                + (string.IsNullOrWhiteSpace(failureMessage) ? "." : $": {failureMessage}")
+                + " Thông tin giấy tờ đã được điền sẵn; ảnh scan cần chọn lại.";
+
+        TempData["Error"] = message;
+
+        return RedirectToAction(
+            "Create",
+            "Documents",
+            new
+            {
+                userId,
+                returnUrl = vm.ReturnUrl,
+                documentType = vm.DocumentType,
+                documentNumber = vm.DocumentNumber,
+                issuedDate = vm.IssuedDate,
+                expiryDate = vm.ExpiryDate
+            });
     }
 
     // =================== SCR-04: Edit ===================

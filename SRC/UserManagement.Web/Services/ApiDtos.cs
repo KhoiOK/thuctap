@@ -80,6 +80,9 @@ public sealed record ProblemDetailsDto(
         413 => "Tệp tải lên vượt quá dung lượng cho phép.",
         415 => "Định dạng tệp không được hỗ trợ.",
         500 => "Đã xảy ra lỗi máy chủ.",
+        // The image storage backend is unavailable: the server-side dependency is down,
+        // not the user's data. Say so instead of the generic message.
+        503 => "Dịch vụ lưu trữ ảnh đang không khả dụng. Vui lòng thử lại sau.",
         _ => "Đã xảy ra lỗi. Vui lòng thử lại."
     };
 }

@@ -34,14 +34,15 @@
     const MIN_CONFIDENCE = 0.60;
     const HIGH_CONFIDENCE = 0.85;
 
-    // Trường form <- trường OCR. Giá trị được ghi vào ô tương ứng.
+    // Trường form <- trường OCR. Khóa phải khớp với tên API trả về
+    // (docs/OCR-Cloudinary-Spec.md §3.3): "issueDate", không phải "issuedDate".
     const FIELD_MAP = {
         fullName: 'FullName',
         dateOfBirth: 'DateOfBirth',
         gender: 'Gender',
         address: 'Address',
         documentNumber: 'DocumentNumber',
-        issuedDate: 'IssuedDate',
+        issueDate: 'IssuedDate',
         expiryDate: 'ExpiryDate'
     };
 
@@ -53,12 +54,13 @@
         gender: 'Giới tính',
         address: 'Địa chỉ',
         issuedDate: 'Ngày cấp',
+        issueDate: 'Ngày cấp',
         expiryDate: 'Ngày hết hạn',
         authorityNo: 'Số hiệu'
     };
 
     // Chuẩn hóa giá trị OCR về định dạng mà <input type="date"> chấp nhận.
-    const DATE_FIELDS = ['dateOfBirth', 'issuedDate', 'expiryDate'];
+    const DATE_FIELDS = ['dateOfBirth', 'issueDate', 'expiryDate'];
 
     let mode = (modeInput && modeInput.value) ? modeInput.value : 'manual';
     let scanning = false;

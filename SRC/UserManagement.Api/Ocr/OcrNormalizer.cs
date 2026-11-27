@@ -39,14 +39,14 @@ public partial class OcrNormalizer
             var confidence = confidences is not null && confidences.TryGetValue(key, out var c) ? c : 1.0;
             var field = key switch
             {
-                "documentNumber" => NormalizeDocumentNumber(extractedValue.Value, documentType, confidence),
-                "fullName" => NormalizeFullName(extractedValue.Value, confidence),
-                "dateOfBirth" => NormalizeDate(extractedValue.Value, confidence, today),
-                "gender" => NormalizeGender(extractedValue.Value, confidence),
-                "address" => NormalizeAddress(extractedValue.Value, confidence),
-                "issueDate" => NormalizeDate(extractedValue.Value, confidence, today),
-                "expiryDate" => NormalizeDate(extractedValue.Value, confidence, today),
-                "authorityNo" => NormalizeAuthorityNo(extractedValue.Value, confidence),
+                "documentNumber" => NormalizeDocumentNumber(extractedValue.Value, documentType, confidence, extractedValue.Source),
+                "fullName" => NormalizeFullName(extractedValue.Value, confidence, extractedValue.Source),
+                "dateOfBirth" => NormalizeDate(extractedValue.Value, confidence, today, extractedValue.Source),
+                "gender" => NormalizeGender(extractedValue.Value, confidence, extractedValue.Source),
+                "address" => NormalizeAddress(extractedValue.Value, confidence, extractedValue.Source),
+                "issueDate" => NormalizeDate(extractedValue.Value, confidence, today, extractedValue.Source),
+                "expiryDate" => NormalizeDate(extractedValue.Value, confidence, today, extractedValue.Source),
+                "authorityNo" => NormalizeAuthorityNo(extractedValue.Value, confidence, extractedValue.Source),
                 _ => new OcrField(null, confidence, extractedValue.Source, false)
             };
 
@@ -56,7 +56,7 @@ public partial class OcrNormalizer
         return result;
     }
 
-    private static OcrField NormalizeDocumentNumber(string raw, DocumentType documentType, double confidence)
+    private static OcrField NormalizeDocumentNumber(string raw, DocumentType documentType, double confidence, OcrFieldSource source)
     {
         var digits = new string(raw.Where(char.IsDigit).ToArray());
 
@@ -78,18 +78,18 @@ public partial class OcrNormalizer
         }
 
         var isValid = NormalizationHelpers.IsValidDocumentNumber(documentType, digits);
-        return new OcrField(string.IsNullOrEmpty(digits) ? null : digits, confidence, OcrFieldSource.Front, isValid);
+        return new OcrField(string.IsNullOrEmpty(digits) ? null : digits, confidence, source, isValid);
     }
 
-    private static OcrField NormalizeFullName(string raw, double confidence)
+    private static OcrField NormalizeFullName(string raw, double confidence, OcrFieldSource source)
     {
         var cleaned = OcrFieldExtractor.CleanValue(raw);
         var collapsed = string.Join(' ', cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries));
         var isValid = collapsed.Length is >= 2 and <= 100;
-        return new OcrField(collapsed, confidence, OcrFieldSource.Front, isValid);
+        return new OcrField(collapsed, confidence, source, isValid);
     }
 
-    private static OcrField NormalizeGender(string raw, double confidence)
+    private static OcrField NormalizeGender(string raw, double confidence, OcrFieldSource source)
     {
         var value = OcrFieldExtractor.RemoveDiacritics(raw.ToLowerInvariant()).Trim();
 
@@ -101,38 +101,42 @@ public partial class OcrNormalizer
             _ => (Gender?)null
         };
 
-        return new OcrField(gender?.ToString(), confidence, OcrFieldSource.Front, gender is not null);
+        return new OcrField(gender?.ToString(), confidence, source, gender is not null);
     }
 
-    private static OcrField NormalizeAddress(string raw, double confidence)
+    private static OcrField NormalizeAddress(string raw, double confidence, OcrFieldSource source)
     {
         var cleaned = OcrFieldExtractor.CleanValue(raw);
         var truncated = cleaned.Length > 500 ? cleaned[..500] : cleaned;
         var isValid = truncated.Length > 0;
-        return new OcrField(truncated, confidence, OcrFieldSource.Front, isValid);
+        return new OcrField(truncated, confidence, source, isValid);
     }
 
-    private static OcrField NormalizeAuthorityNo(string raw, double confidence)
+    private static OcrField NormalizeAuthorityNo(string raw, double confidence, OcrFieldSource source)
     {
         var cleaned = OcrFieldExtractor.CleanValue(raw);
-        return new OcrField(cleaned.Length == 0 ? null : cleaned, confidence, OcrFieldSource.Back, cleaned.Length > 0);
+        return new OcrField(cleaned.Length == 0 ? null : cleaned, confidence, source, cleaned.Length > 0);
     }
 
-    private OcrField NormalizeDate(string raw, double confidence, DateOnly today)
+    private OcrField NormalizeDate(string raw, double confidence, DateOnly today, OcrFieldSource source)
     {
         var parsed = TryParseDate(raw, today, out var inferred);
 
         if (parsed is null)
         {
-            return new OcrField(null, confidence, OcrFieldSource.Front, false);
+            return new OcrField(null, confidence, source, false);
         }
 
         // An issued date in the future or an expiry date in the past is still a "readable"
         // value - the business validation reports it, not the OCR layer.
+        //
+        // The side is taken from where the value was actually found: the expiry date is
+        // printed on the BACK of a CCCD, the date of birth on the FRONT. Hard-coding
+        // "Front" here would report every date as coming from the front.
         return new OcrField(
             parsed.Value.ToString("yyyy-MM-dd"),
             confidence,
-            OcrFieldSource.Front,
+            source,
             true,
             inferred);
     }

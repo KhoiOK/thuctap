@@ -23,13 +23,29 @@ public class DocumentsController : Controller
 
     // =================== SCR-06: Create ===================
 
+    /// <summary>
+    /// Renders the "Thêm giấy tờ" form.
+    ///
+    /// The optional query parameters (<c>documentType</c>, <c>documentNumber</c>,
+    /// <c>issuedDate</c>, <c>expiryDate</c>) let a failed Quick Create hand over the
+    /// values the user already typed instead of forcing them to retype everything.
+    /// </summary>
     [HttpGet("Create")]
-    public IActionResult Create(Guid userId, [FromQuery] string? returnUrl)
+    public IActionResult Create(
+        Guid userId,
+        [FromQuery] string? returnUrl,
+        [FromQuery] string? documentType = null,
+        [FromQuery] string? documentNumber = null,
+        [FromQuery] DateOnly? issuedDate = null,
+        [FromQuery] DateOnly? expiryDate = null)
     {
         var vm = new IdentityDocumentFormViewModel
         {
             UserId = userId,
-            DocumentType = "CCCD",
+            DocumentType = string.IsNullOrWhiteSpace(documentType) ? "CCCD" : documentType.Trim(),
+            DocumentNumber = documentNumber?.Trim() ?? string.Empty,
+            IssuedDate = issuedDate,
+            ExpiryDate = expiryDate,
             ReturnUrl = SanitizeReturnUrl(returnUrl)
         };
         return View("Form", vm);

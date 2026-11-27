@@ -5,3 +5,8 @@ paddlepaddle==3.0.*
 opencv-python-headless
 numpy
 python-multipart
+
+# Only needed by make_test_cccd.py, which renders the synthetic CCCD cards used
+# by the live OCR smoke test. It draws Vietnamese diacritics, so it needs a
+# Unicode-capable font (Pillow) rather than OpenCV's putText.
+pillow

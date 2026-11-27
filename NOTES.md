@@ -877,3 +877,387 @@ dotnet test:  284/284 passed (220 API + 64 Web)
 - `docs/API-Spec.md` §2 – them dong 12, 12b, 13 vao bang endpoint.
 - `docs/UI-Spec.md` – them SCR-08, route bang, cau truc View.
 
+---
+
+## Phase 8.10 – Chay OCR that voi PaddleOCR 3.2.0 (fix 4 loi trong microservice)
+
+Khi chay that Web -> API -> PaddleOCR that, log hien:
+
+```
+System.Net.Http.HttpRequestException: No connection could be made because the
+target machine actively refused it. (localhost:8100)
+warn: OCR preview unavailable: Không thể kết nối tới dịch vụ quét tự động.
+```
+
+Day **khong phai** loi code .NET – day la trang thai "OCR service chua chay" duoc
+thiet ke san (API tra 503, UI giu nguyen luong nhap tay). Nhung khi bat service
+len, phat hien **4 loi that** trong `services/paddleocr/app/main.py` (code duoc
+viet cho PaddleOCR 2.x trong khi 3.2.0 doi hoàn toan cau truc ket qua).
+
+### Cach chay service
+
+```bash
+cd services/paddleocr
+pip install -r requirements.txt
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8100
+```
+
+`GET http://localhost:8100/health` -> `{"status":"ok","modelsLoaded":true}`.
+Lan dau model can ~1-2 phut de tai (`~/.paddlex/official_models/`).
+
+### 4 loi da sua trong `services/paddleocr/app/main.py`
+
+| # | Loi | Nguyen nhan | Sua |
+|---|---|---|---|
+| 1 | `ValueError: not enough values to unpack (expected 3, got 2)` | `preprocess_image` tra anh **grayscale 2D**; PaddleOCR 3.x unpack `img.shape` thanh 3 gia tri nen can anh 3 kenh BGR | `cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)` |
+| 2 | `not enough values to unpack (expected 3, got 2)` tai `text_detection/processors.py` | goi `engine.ocr()` (API 2.x, da deprecated) | doi sang `engine.predict()` |
+| 3 | `rawText` rong / khong tach duoc truong | 3.x tra ve `OCRResult` voi `rec_texts` / `rec_scores` / `rec_polys`, khong phai list `[[box,(text,score)]]` | `extract_lines` ho tro ca 3.x (`rec_texts`) va 2.x (legacy list), va ca bien the `predict()` tra **generator** |
+| 4 | `documentNumber` lay nham gia tri cua dong sau ("H VÀ TÊN" thay vi "SỐ CCCD") | `find_fields` tach value tu **dong raw** bang `line.lower().find("so")` – dong raw co dau tieng Viet nen `find` tra `-1`, value bi lech | tach value tu dong **da chuan hoa** (khong dau) + dung `setdefault` de label tong quat ("so") khong ghi de label cu the ("so cccd") |
+
+Ngoai ra, bo sung label bien the cho OCR hay doc mat chu: `"co gia tri den"`,
+`"gia tri den"` (OCR hay bo chu `i`), kem mapping `cogiatriden` /
+`giatriden` -> `expiryDate` trong `canonical_field_names`.
+
+### Test hoi quy Python
+
+`services/paddleocr/test_main.py` – 10 test, chay bang `python test_main.py`
+(khong can pytest). Phu 4 loi tren + bao dam `preprocess_image` tra anh 3 kenh.
+
+### Test Playwright voi OCR THAT
+
+`services/paddleocr` chi chay khi microservice len; test tu bo qua (skip,
+khong fail) neu `GET :8100/health` khong tra 200.
+
+| File | Vai tro |
+|---|---|
+| `tests/UserManagement.Web.Tests/Infrastructure/LiveOcrTestHarness.cs` | Harness dung `PaddleOcrClient` THAT (khong phai fake) |
+| `tests/UserManagement.Web.Tests/BrowserLiveOcrTests.cs` | 2 test: preview qua API + qua trinh duyet |
+
+**Luu y quan trong khi viet harness moi (da ton thoi gian de tim):**
+
+1. API host phai bind **rieng** port: dung `builder.WebHost.UseUrls(...)`, KHONG
+   dua vao env var `ASPNETCORE_URLS` (env var dung chung voi Web host -> hai host
+   tranh port, request roi sang host sai -> 404).
+2. `PaddleOcrClient` can `AddHttpClient<IPaddleOcrClient, PaddleOcrClient>(...)`,
+   khong phai `AddSingleton` (thiếu `HttpClient` -> 500 khi goi OCR).
+3. Khi goi API bang `HttpClient`, dung `BaseAddress` + path khong dau `/`.
+   Ghep chuoi `$"{base}/api/..."` tao `//api/...` -> 404.
+
+### Anh CCCD mo phong
+
+`services/paddleocr/make_test_cccd.py` (can Pillow) ve anh CCCD co dau tieng Viet
+bang font Unicode (`arial.ttf`). OpenCV `putText` **khong** ve duoc dau tieng Viet
+nen se ra `S??? CCCD` va khong parse duoc – dung Pillow cho test nay.
+
+### Kiem chung end-to-end (Web -> API -> PaddleOCR)
+
+Ca 3 thanh phan phai chay cung luc:
+
+| Thanh phan | Port | Lenh |
+|---|---|---|
+| PaddleOCR | 8100 | `python -m uvicorn app.main:app --host 127.0.0.1 --port 8100` (trong `services/paddleocr`) |
+| API | 5051 | `dotnet run --project SRC/UserManagement.Api` |
+| Web | 5052 | `dotnet run --project SRC/UserManagement.Web --urls "http://localhost:5052"` |
+
+Ket qua kiem chung (2026-11-24), anh CCCD mo phong tren:
+
+1. **Microservice** – `POST http://localhost:8100/ocr/identity-document`
+   (form field: `front` / `back`) -> HTTP 200, `documentNumber=079095001234`,
+   `dateOfBirth=20/04/1995`, `gender=NAM`, `issueDate=10/05/2021`, ~2.9s.
+2. **API preview** (API-12b) – `POST http://localhost:5051/api/v1/identity-documents/ocr/preview`
+   (form field: `frontImage` / `backImage`) -> HTTP 200, cac field da chuan hoa
+   (`dateOfBirth=1995-04-20`, `gender=Male`), ~8s.
+3. **Web proxy** – `POST http://localhost:5052/Users/QuickCreate/OcrPreview`
+   (can antiforgery token + `documentType`, `frontImage`, `backImage`)
+   -> HTTP 200 voi body `{ ok: true, data: {...} }`.
+4. **Giao dien** – Quick Create > chon "Quet CCCD" > upload 2 anh > bam
+   "Bat dau nhan dien OCR": panel "Ket qua nhan dien" hien thi `So giay to`,
+   `Ngay sinh`, `Gioi tinh` (Tin cay cao) va form **tu dong dien**:
+   `DateOfBirth=1995-04-20`, `Gender=male`, `DocumentNumber=079095001234`.
+
+Log khong con `actively refused` hay `OCR preview failed with status 503` –
+API log `Received HTTP response headers ... - 200` cho moi request toi `:8100`.
+
+> Luu y khi kiem tra thu cong: `dotnet test` **khong chay duoc** khi dang
+> chay `dotnet run` cho API/Web – file `UserManagement.Api.exe` bi khoa
+> (MSB3027). Hay stop app truoc, chay test, roi chay lai app.
+
+Tong hop kiem thu tai thoi diem nay:
+
+| Bo test | Ket qua |
+|---|---|
+| `services/paddleocr/test_main.py` | 10/10 pass |
+| `tests/UserManagement.Api.Tests` | 220/220 pass |
+| `tests/UserManagement.Web.Tests` | 108/108 pass |
+
+---
+
+## Phase 8.11 – OCR tren anh CCCD THAT (sua 9 loi trong microservice + API)
+
+Anh CCCD **that** (chup tay, chup ngoai) khac xa anh mo phong cua
+`make_test_cccd.py`. Khi chay `POST :8100/ocr/identity-document` voi anh that,
+service tra ve **sai**:
+
+```
+documentNumber = "cialist republic of viet nam"   <- header the card
+fullName       = "sé/No.048203001078"              <- dong so giay to
+dateOfBirth    = "NGUYN MINH KHI"                   <- ten, khong phai ngay sinh
+```
+
+Nguyen nhan goc: **anh chup nghinh**. The CCCD la **landscape** nhung anh la
+**portrait**, nen PaddleOCR doc dung chu nhung tra ve cac dong theo thu tu
+**khong theo layout cua the card** – khong the nao giup "dong sau" cung la
+"gia tri cua nhau".
+
+### 9 loi da sua
+
+| # | Loi | Nguyen nhan | Sua |
+|---|---|---|---|
+| 1 | `documentNumber` = `"cialist republic of viet nam"` | label tong quat `"so"` khop dong header `"SOCIALIST REPUBLIC OF VIET NAM"` | them `GENERIC_LABELS` – label `"so"` chi duoc chap nhan khi gia tri ra **chu so** |
+| 2 | `fullName` = `"sé/No.048203001078"` | the CCCD that **khong co** nhan "Số CCCD" – dong so ghi `số/No.048203001078` | `_number_in_line()` lay so ngay tren dong label |
+| 3 | `dateOfBirth` = `"NGUYN MINH KHI"` | the **song ngang** nhung gia tri o dong duoi; OCR tra ve thu tu khong dung | `_find_value_for_label()` **dung toa do bounding box** (cung hang / dong duoi + cung cot) thay vi thu tu dong OCR |
+| 4 | Anh chup nghinh => moi cot doc | `use_doc_orientation_classify=False` | bat **`use_doc_orientation_classify=True`** – model xoay dung the card, thu tu doc lai dung |
+| 5 | OCR bo nguyen am: `"Gii tính"`, `"C gia trj dn"` | anh mo va do phan gian | `_label_matches()` so san tren **khung xương** (bo nguyen am + dau cach) cho phep sai 1 ky tu |
+| 6 | `"ngay cap"` khop `"ngay sinh"` => bay `issueDate` = ngay sinh | fallback "first word" ap dung cho moi label | chi dung fallback do cho label ngan (`len <= 3`); them `_value_matches_label()` kiem **dung hinh dang** gia tri (ngay phai la ngay, so phai la so) |
+| 7 | `05/10/2003` bi cat thanh `10/2003` | `_clean_value` cat truoc `/` | chi cat khi phan sau **khong phai ngay** |
+| 8 | `Ngày, tháng, năm / Date, month, year22/04/2021` | OCR **dinh** ngay vao chu | `_date_in_line()` lay ngay co trong dong label |
+| 9 | API bo qua ket qua cua engine | `OcrService` goi `OcrFieldExtractor.Extract(response.RawText)` – **parse lai raw text bang thuat toan yeu hon** | them overload `Extract(engineFields, rawText)`: **ket qua cua engine la chuan**, text scan chi la fallback |
+
+### Cac ham moi trong `services/paddleocr/app/main.py`
+
+| Ham | Vai tro |
+|---|---|
+| `_build_lines(result)` | Doc `rec_polys` -> `TextLine` (co bounding box) |
+| `_is_vertical(line)` | Phat hien box doc – dung khi card chua xoay |
+| `_same_row(label, candidate)` | So sanh **tam** 2 box (dung cho gia tri cung dong) |
+| `_find_value_for_label()` | Ghep nhan voi gia tri: cung hang ben phai -> giong trong dong label -> dong duoi **cung cot** |
+| `find_fields_geo()` | Bo ghep bang **toa do** – thu tu doc cua OCR khong con quan trong |
+| `_vowel_insensitive()` / `_skeleton_contains()` | So sanh nhan khi OCR mat nguyen am / mat chu |
+| `_date_in_line()` / `_number_in_line()` | Lay gia tri nam ngay tren dong nhan |
+| `_value_matches_label()` | Kiem gia tri co **dung hinh dang** cua truong hay khong |
+| `parse_mrz(lines, printed_number)` | Doc MRZ; **so giuoc** cua so in la moc |
+| `_mrz_check_digit_ok()` | Kiem check digit ICAO 9303 |
+
+> MRZ chi la **fallback**: OCR cua MRZ lam lech cac con so (ngay sinh co check
+> digit hop le), nen so in tren the luon duoc uu tien. `_mrz_number_candidates()`
+> dung ICAO weights de xac nhan so khi khong co so in.
+
+### API – dung ket qua cua engine
+
+`SRC/UserManagement.Api/Ocr/OcrFieldExtractor.cs` – them overload:
+
+```csharp
+public static Dictionary<string, ExtractedValue> Extract(
+    IReadOnlyDictionary<string, PaddleOcrField>? engineFields,
+    IReadOnlyDictionary<string, string>? rawText)
+```
+
+- `engineFields` (tu engine, da dung toa do) **thang**;
+- `rawText` (text scan) chi dung cho truong engine **khong tim thay**.
+
+`OcrService.ScanAsync` va `PreviewAsync` doi sang goi overload nay.
+
+### Test hoi quy moi
+
+| File | Noi dung |
+|---|---|
+| `services/paddleocr/test_real_cccd.py` | 15 test: ghim parser vao **raw OCR that** cua anh CCCD that (co bounding box that) |
+| `tests/UserManagement.Api.Tests/Ocr/OcrFieldExtractorTests.cs` | +5 test cho overload moi |
+
+### Ket qua kiem chung voi anh CCCD THAT
+
+| Tang | Ket qua |
+|---|---|
+| Microservice `:8100` | `documentNumber=048203001078`, `fullName=NGUYN MINH KHI`, `dateOfBirth=05/10/2003`, `gender=Nam`, `issueDate=22/04/2021`, `address=Xuân Hng, Xuân Trưng, Nam Đnh, M An, Ng Hành Son, Đà Nng` |
+| API `:5051` | `documentNumber=048203001078`, `fullName=NGUYN MINH KHI`, `dateOfBirth=2003-10-05`, `gender=Male`, `issueDate=2021-04-22` |
+
+Tong hop kiem thu tai thoi diem nay:
+
+| Bo test | Ket qua |
+|---|---|
+| `services/paddleocr/test_main.py` | 10/10 pass |
+| `services/paddleocr/test_real_cccd.py` | 15/15 pass |
+| `tests/UserManagement.Api.Tests` | 225/225 pass |
+| `tests/UserManagement.Web.Tests` | 108/108 pass |
+
+### Dong bo `docs/OCR-Cloudinary-Spec.md` voi code thuc te
+
+Spec cu viet "PaddleOCR chi tra ve text tho" (§3.3) va "chi doc thu tu dong OCR" —
+sau Phase 8.11 ca hai deu **khong con dung**. Da cap nhat:
+
+| Muc | Thay doi |
+|---|---|
+| §3.3 | Ghi ro ranh gioi moi: service Python tra ve `fields` (dinh vi **hinh hoc** bang bounding box), backend .NET chuan hoa cuoi cung + fallback `rawText` |
+| §3.3.1 | Them quy tac gop `Quê quán` + `Nơi thường trú` -> `address` |
+| §3.3.2 | Tach thanh **Lop 1 (Python, hinh hoc)** va **Lop 2 (.NET, chuan hoa)**; ghi them so khop nhan bo nguyen am + kiem hinh dang gia tri |
+| §3.3.4 | Bo `grayscale/CLAHE/deskew` (chua bao gio duoc trien khai); them **phan loai huong tai lieu** (`use_doc_orientation_classify=True`) la buoc **bat buoc** |
+
+> `deskew` va `CLAHE` da duoc ghi trong spec nhung khong ton tai trong code.
+> Thay bang `use_doc_orientation_classify=True` — giai quyet truc tiep benh "anh chup nghinh".
+> Bai toan deskew goc (nghieng) van duoc xu ly o tang orientation cua PaddleOCR.
+
+### Loi moi phat hien khi kiem chung lai: `source` cua truong ngay sai mat
+
+Kiem tra lai API bang **anh CCCD that** (khong phai anh mo phong) thi phat hien
+`expiryDate` bi bao loi `source = "front"`, trong khi microservice bao dung
+`source = "back"`.
+
+**Nguyen nhan:** `OcrNormalizer.NormalizeDate()` **hard-code** `OcrFieldSource.Front`
+cho moi truong ngay. Do do `expiryDate` — viet o **mat sau** the CCCD — cung bi gan
+nham la mat truoc.
+
+**Sua:** `NormalizeDate()` nhan them tham so `source` va dung chinh source cua gia tri
+doc duoc. Cac truong ngay giu nguyen mat cua chung:
+
+| Truong | Mat that su |
+|---|---|
+| `dateOfBirth` | truoc |
+| `issueDate` | truoc |
+| `expiryDate` | sau |
+
+**Test hoi quy:** +2 test trong `tests/UserManagement.Api.Tests/Ocr/OcrNormalizerTests.cs`
+(`Date_Keeps_The_Side_It_Was_Read_From`, `Date_That_Cannot_Be_Parsed_Keeps_Its_Side`).
+
+### Loi moi phat hien khi kiem chung lai: ten truong OCR `issueDate` vs `issuedDate`
+
+Kiem chung UI bang trinh duyet that (Playwright) cho thay **ong "Ngay cap" khong duoc
+dien**, du API tra ve `issueDate = 2021-05-10` va do tin cay 0.9 (dat nguong).
+
+**Nguyen nhan:** API + spec §3.3 dung ten truong OCR la **`issueDate`**, nhung lop Web
+tim bang **`issuedDate`** (dung ten truong *form*, khong phai ten truong OCR):
+
+| Noi | Sai | Dung |
+|---|---|---|
+| `wwwroot/js/quick-create-user.js` – `FIELD_MAP` | `issuedDate` | `issueDate` |
+| `wwwroot/js/ocr.js` – `FIELD_MAP` | `issuedDate` | `issueDate` |
+| `Views/Documents/Form.cshtml` – badge | `"issuedDate"` | `"issueDate"` |
+| `ViewModels/Users/OcrScanViewModel.cs` – `OcrFieldNames` | `IssuedDate = "issuedDate"` | `IssueDate = "issueDate"` |
+
+Hai he thong deu "dung" theo cach rieng: `issuedDate` la ten truong **form** khi POST
+len API-07/13 (giữ nguyên), con `issueDate` la ten truong **OCR** trong response.
+
+**Sua:** doi khoa `FIELD_MAP` va badge sang `issueDate`; them comment giai thich
+ranh gioi de khong lan nhieu lai. `OcrFieldNames.IssuedDate` -> `OcrFieldNames.IssueDate`.
+
+**Test hoi quy:** +1 test trong `tests/UserManagement.Web.Tests/BrowserQuickCreateTests.cs`
+(`Ocr_Preview_Fills_The_Issued_Date`) — kiem `#IssuedDate` = `2021-05-10` va
+`#ExpiryDate` = `2036-04-20` sau khi quet. Test nay **fail** truoc khi sua.
+
+> `address` van trong trong ket qua: anh CCCD test (`services/paddleocr/front.jpg`) la
+> anh mo phong khong co nhan "Dia chi", nen khong co gi de doc — khong phai loi.
+
+### Loi lon nhat phat hien khi dung ANH CCCD THAT: sai mat cua hai ngay
+
+Khi tim lai anh CCCD that (da gui trong chat truoc do) va chay OCR tren no, phat hien
+**ca hai ngay deu sai**:
+
+| Truong | Ket qua truoc | Ket qua sau |
+|---|---|---|
+| `expiryDate` | **thieu hoan toan** | `2028-10-05` (source `front`) |
+| `issueDate` | `2021-04-22` (source `back`) | `2021-04-22` (source `back`) — giu nguyen |
+
+**Nguyen nhan:** anh CCCD that in **ngay han** o **MAT TRUOC** (goc duoi trai:
+`CÓ GIÁ TRỊ ĐẾN: 05/10/2028`) va **ngay cap** o **MAT SAU**
+(`Ngày, tháng, năm / Date, month, year: 22/04/2021`).
+
+Nhung spec §3.3 va code .NET ghi **ngược lai** (`issueDate` = truoc, `expiryDate` = sau),
+va `FRONT_LABELS` trong Python **khong co** nhan "Có giá trị đến" nen `expiryDate`
+khong bao gio duoc doc tren mat truoc.
+
+**Da sua (theo phuong an chot: theo anh that, sua ca Python va .NET):**
+
+| Tang | Thay doi |
+|---|---|
+| `services/paddleocr/app/main.py` | them nhan han (`co gia tri den`, `gia tri den`, `ngay het han`, `date of expiry`) vao `FRONT_LABELS`; giu `ngay thang nam` o `BACK_LABELS`; them `dateofexpiry` vao `_DATE_LABELS` |
+| `SRC/UserManagement.Api/Ocr/OcrFieldExtractor.cs` | `FieldSources`: `issueDate` -> `Back`, `expiryDate` -> `Front`; them alias `ngay thang nam` cho `issueDate` va `date of expiry` cho `expiryDate` |
+| `SRC/UserManagement.Api/Ocr/OcrNormalizer.cs` | moi truong nhan `source` tu `extractedValue.Source` thay vi hard-code `Front`/`Back` (ke ca `documentNumber`, `fullName`, `gender`, `address`, `authorityNo`) |
+| `docs/OCR-Cloudinary-Spec.md` | §3.3.1 va cac vi du JSON cap nhat theo mat in thuc te |
+
+> Service Python **do ca hai mat** cho nhan ngay, va `source` trong response la mat
+> **thuc su doc duoc** gia tri — khong phai mat quy uoc.
+
+**Test hoi quy:**
+- `services/paddleocr/test_main.py`: +2 test (expiry doc o front, issue doc o back).
+- `services/paddleocr/test_real_cccd.py`: +2 test va them `GEOMETRY_BACK` (vi tri OCR
+  that cua mat sau).
+- `tests/UserManagement.Api.Tests/Ocr/OcrFieldExtractorTests.cs`: +1 test
+  (`Extract_Finds_The_Expiry_Date_On_The_Front_Side`).
+- `tests/UserManagement.Api.Tests/Ocr/OcrNormalizerTests.cs`: +1 test
+  (`Text_Fields_Keep_The_Side_They_Were_Read_From`).
+- `tests/UserManagement.Web.Tests/BrowserLiveOcrTests.cs`: +1 test
+  (`Live_Ocr_Reads_The_Real_Cccd_Photo_With_The_Dates_On_The_Right_Sides`) — chay
+  that tren anh CCCD that, tu bo qua khi anh khong co tren may.
+
+> Anh CCCD that khong commit vao repo (la giay to nhan cua nguoi thu nghiem), nen
+> test live tu skip khi tim thay khong co file.
+
+### Kiem chung lai toan he thong
+
+**Voi anh CCCD THAT** (`services/paddleocr/real/front.jpg` + `back.jpg`):
+
+| Tang | Ket qua |
+|---|---|
+| Microservice `:8100` | `documentNumber=048203001078`, `fullName=NGUYN MINH KHI`, `dateOfBirth=05/10/2003`, `gender=Nam`, `address=Xuân Hng, Xuân Trưng, Nam Đnh, M An, Ng Hành Son, Đà Nng`, `expiryDate=05/10/2028` (source `front`), `issueDate=22/04/2021` (source `back`) |
+| API `:5051` | cung 7 truong, chuan ISO: `expiryDate=2028-10-05` (source `front`), `issueDate=2021-04-22` (source `back`) |
+| Web UI `:5052` | Quick Create tu dong dien **7/7 truong**, badge xanh, **khong co 503** |
+
+Tong hop kiem thu tai thoi diem nay:
+
+| Bo test | Ket qua |
+|---|---|
+| `services/paddleocr/test_main.py` | 12/12 pass |
+| `services/paddleocr/test_real_cccd.py` | 17/17 pass |
+| `tests/UserManagement.Api.Tests` | 229/229 pass |
+| `tests/UserManagement.Web.Tests` | 110/110 pass (+1 test hoi quy) |
+| **Tong** | **468 test pass** |
+
+### Xoa canh bao bao mat khi build: `System.Security.Cryptography.Pkcs` 9.0.4
+
+`dotnet build` canh bao `NU1903` (muc **high**) va `NU1902` (moderate) cho
+`System.Security.Cryptography.Pkcs` 9.0.4.
+
+**Nguyen nhan:** `Microsoft.Data.SqlClient` 6.1.1 (keo ve boi `Azure.Identity` ->
+`Microsoft.Identity.Client` -> `Microsoft.IdentityModel.Protocols.OpenIdConnect`)
+keo `System.Security.Cryptography.Pkcs` 9.0.4 lam package **transitive**.
+
+**Sua:** them `PackageReference` truc tiep trong `UserManagement.Api.csproj` de **ghim**
+phien ban da va:
+
+```xml
+<PackageReference Include="System.Security.Cryptography.Pkcs" Version="9.0.23" />
+```
+
+Ket qua: `NU1902` + `NU1903` **bien mat**. Chi con canh bao license cua SixLabors
+ImageSharp (can key khi build Release).
+
+### Sua them canh bao `CS8620` trong `OcrService`
+
+`DeleteAsync(new[] { frontPublicId, backPublicId }, ...)` — `backPublicId` co the
+`null` (anh sau khong bat buoc), nen khong khop voi `IEnumerable<string>`.
+
+**Sua:** loc bo cac id null truoc khi goi, va dung `Select(id => id!)` de compiler
+suy ra danh tinh khong null:
+
+```csharp
+var publicIds = new[] { frontPublicId, backPublicId }
+    .Where(id => !string.IsNullOrWhiteSpace(id))
+    .Select(id => id!)
+    .ToArray();
+```
+
+Build API sau khi sua: **0 error, 0 warning CS**.
+
+### Loi `address already in use` khi chay `dotnet run`
+
+Khong phai loi code — chi la **xung dot port**. Cac service chay nen tu phien truoc
+da giu port `5051`/`5052`. Cach xu ly:
+
+```powershell
+Get-NetTCPConnection -State Listen -LocalPort 5051 | Select-Object OwningProcess
+Get-Process UserManagement.Api,UserManagement.Web -ErrorAction SilentlyContinue | Stop-Process -Force
+```
+
+> `dotnet test` cung bianh loi khoa file (`MSB3026`) neu API/Web dang chay — phai
+> dung chung truoc khi test.
+
+

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using UserManagement.Api.Exceptions;
+using UserManagement.Api.FileStorage;
 
 namespace UserManagement.Api.Middleware;
 
@@ -88,6 +89,17 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                  string.IsNullOrWhiteSpace(bad.Message) ? "Yêu cầu không hợp lệ." : bad.Message,
                  null),
 
+            // The image storage backend is unavailable or not configured. This is a
+            // server-side dependency problem, not bad user input: mapping it to 500
+            // told the user "something went wrong" and hid the actionable message.
+            // 503 + the original message lets the UI tell the user what to do.
+            CloudinaryException cld =>
+                (StatusCodes.Status503ServiceUnavailable,
+                 string.IsNullOrWhiteSpace(cld.Message)
+                     ? "Dịch vụ lưu trữ ảnh đang không khả dụng."
+                     : cld.Message,
+                 null),
+
             _ => (StatusCodes.Status500InternalServerError, "Đã xảy ra lỗi không mong muốn.", null)
         };
     }
@@ -115,6 +127,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         StatusCodes.Status400BadRequest => "https://tools.ietf.org/html/rfc9110#section-15.5.1",
         StatusCodes.Status404NotFound => "https://tools.ietf.org/html/rfc9110#section-15.5.5",
         StatusCodes.Status409Conflict => "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+        StatusCodes.Status503ServiceUnavailable => "https://tools.ietf.org/html/rfc9110#section-15.6.4",
         StatusCodes.Status500InternalServerError => "https://tools.ietf.org/html/rfc9110#section-15.6.1",
         _ => "https://tools.ietf.org/html/rfc9110#section-15"
     };

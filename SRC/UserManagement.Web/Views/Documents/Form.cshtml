@@ -105,15 +105,15 @@
             Ngày cấp
             @if (Model.Ocr is not null)
             {
-                var badge = Model.Ocr.ConfidenceBadge("issuedDate", Model.OcrMinConfidence, Model.OcrHighConfidence);
+                var badge = Model.Ocr.ConfidenceBadge("issueDate", Model.OcrMinConfidence, Model.OcrHighConfidence);
                 if (badge is not null)
                 {
-                    <span class="ocr-inline-badge" data-ocr-badge="issuedDate" data-kind="@badge"></span>
+                    <span class="ocr-inline-badge" data-ocr-badge="issueDate" data-kind="@badge"></span>
                 }
             }
         </label>
         <input asp-for="IssuedDate" type="date" class="field" aria-describedby="issuedDate-error"
-               data-ocr-field="issuedDate" />
+               data-ocr-field="issueDate" />
         @if (fieldErr("issuedDate") is string idErr)
         {
             <p id="issuedDate-error" class="error-text">

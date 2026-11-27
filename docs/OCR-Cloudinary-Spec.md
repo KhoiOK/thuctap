@@ -188,13 +188,13 @@ Response `200`:
     "issueDate": {
       "value": "2021-05-10",
       "confidence": 0.93,
-      "source": "front",
+      "source": "back",
       "boundingBox": [700, 280, 900, 325]
     },
     "expiryDate": {
       "value": "2036-04-20",
       "confidence": 0.96,
-      "source": "back",
+      "source": "front",
       "boundingBox": [700, 280, 900, 325]
     },
     "authorityNo": {
@@ -236,8 +236,17 @@ Response `422` (không đọc được gì):
 
 ### 3.3. Quy tắc chuẩn hóa kết quả OCR
 
-Đây là phần **quan trọng nhất** — PaddleOCR chỉ trả về text thô. Việc hiểu
-"12 chữ số này là số CCCD" phải nằm ở **Backend .NET**, không nằm trong service Python.
+Đây là phần **quan trọng nhất**. Việc hiểu "12 chữ số này là số CCCD" phải nằm ở
+**Backend .NET**, không nằm trong service Python.
+
+> **Cập nhật (Phase 8.11):** ranh giới đã mở rộng. Service Python **không** chỉ trả
+> text thô nữa — nó trả về cả trường đã gán nhãn (`fields`), trong đó giá trị được định
+> vị bằng **hình học bounding box** (`rec_polys`), không dựa vào thứ tự dòng OCR.
+> Lý do: ảnh CCCD thật bị nghiêng/nhiễu và có bố cục 2 cột, nên thứ tự dòng OCR không
+> khớp với thứ tự đọc trực quan — chỉ dựa vào "dòng kế tiếp" sẽ lấy sai giá trị.
+> Backend .NET vẫn là nơi **chuẩn hóa cuối cùng** (định dạng ngày, giới tính, giá trị
+> rỗng, trường thiếu) và vẫn có fallback về phân tích `rawText` nếu engine không trả
+> trường nào.
 
 #### 3.3.1. Bảng ánh xạ nhãn → trường nghiệp vụ
 
@@ -248,13 +257,42 @@ Response `422` (không đọc được gì):
 | `Ngày sinh` | `dateOfBirth` | trước | `dd/MM/yyyy` → ISO `yyyy-MM-dd` |
 | `Giới tính` | `gender` | trước | `Nam`→`Male`, `Nữ`→`Female`, `Khác`→`Other` |
 | `Địa chỉ` | `address` | trước | Trim, bỏ xuống dòng, ≤ 500 ký tự |
-| `Ngày cấp` | `issueDate` | trước | `dd/MM/yyyy` → ISO |
-| `Có giá trị đến ngày` | `expiryDate` | sau | `dd/MM/yyyy` → ISO |
+| `Ngày, tháng, năm` (Ngày cấp) | `issueDate` | sau | `dd/MM/yyyy` → ISO |
+| `Có giá trị đến` | `expiryDate` | trước | `dd/MM/yyyy` → ISO |
 | `Số hiệu` | `authorityNo` | sau | Chuỗi số, không dùng để định danh |
+
+> **Mặt in thực tế (CCCD 12 số):** ngày cấp (`Ngày, tháng, năm`) nằm ở **mặt sau**,
+> còn ngày hết hạn (`Có giá trị đến` / `Date of expiry`) nằm ở **mặt trước**, góc dưới
+> trái. Bảng trên đã cập nhật theo ảnh CCCD thật. Service Python dò **cả hai mặt** cho
+> nhãn ngày, và `source` trong response là mặt thực sự đọc được giá trị — không phải
+> mặt quy ước.
+
+**Gộp địa chỉ (CCCD mới):** CCCD ghi hai nhãn riêng — `Quê quán` và `Nơi thường trú`.
+Cả hai được gộp lại thành trường `address` theo thứ tự `Quê quán` → `Nơi thường trú`,
+mỗi nhãn có thể trải nhiều dòng.
 
 #### 3.3.2. Quy tắc trích xuất
 
-- Tách `rawText` thành các dòng, bỏ dòng rỗng.
+**Lớp 1 — Service Python (định vị hình học, trả về `fields`):**
+
+- Dùng `rec_polys` (bounding box) của từng dòng text để định vị giá trị so với nhãn,
+  theo thứ tự ưu tiên:
+  1. **Giá trị nội tuyến** — nằm ngay sau `:` trên cùng dòng nhãn
+     (ví dụ `số/No.048203001078`, `Giới tính / Sex: Nam`).
+  2. **Cùng hàng, bên phải** — nhãn và giá trị cùng hàng, giá trị lệch sang phải
+     (dung sai theo tâm dọc).
+  3. **Ngay bên dưới, cùng cột** — giá trị nằm dưới nhãn, có vùng `x` chồng lấn
+     và trong khoảng cách dọc gần.
+- Nhãn được so khớp **không phân biệt nguyên âm**: OCR mờ hay rơi dấu tiếng Việt
+  (`Gii tính` thay vì `Giới tính`, `C gia trj dn` thay vì `Có giá trị đến`).
+  Bộ xương âm tiết được so sánh với dung sai rớt 1 ký tự.
+- Giá trị được **kiểm tra hình dạng theo nhãn**: nhãn ngày tháng chỉ nhận giá trị khớp
+  `dd/MM/yyyy`; nhãn số chỉ nhận giá trị chứa chữ số — tránh khớp nhầm.
+- Nhãn chung (`Số`) chỉ khớp khi giá trị **giống số**.
+
+**Lớp 2 — Backend .NET (chuẩn hóa cuối cùng):**
+
+- Ưu tiên `fields` do engine trả về; chỉ phân tích `rawText` cho trường còn thiếu.
 - Với mỗi trường, tìm dòng chứa nhãn tương ứng (không phân biệt hoa thường,
   bỏ dấu, chuẩn hóa khoảng trắng).
 - Lấy phần còn lại của dòng làm giá trị.
@@ -274,12 +312,15 @@ ngày sinh chỉ có **2 chữ số năm** → mặc định `2000 + yy` nếu k
 
 Service Python thực hiện (không ảnh hưởng ảnh gốc lưu trên Cloudinary):
 
-1. Grayscale + tăng tương phản (CLAHE).
-2. Chỉnh deskew (xoay nghiêng) nếu góc lệch > 1°.
-3. Resize về chiều cao 1600 px (giữ tỷ lệ).
-4. Lọc nhiễu nhẹ.
+1. Resize về chiều cao 1600 px (giữ tỷ lệ).
+2. Lọc nhiễu nhẹ.
+3. **Phân loại hướng tài liệu** (`use_doc_orientation_classify=True`): tự nhận diện và
+   xoay ảnh về chiều đọc đúng (0/90/180/270 độ).
 
 Ảnh gốc **không** bị thay đổi — Cloudinary vẫn lưu ảnh nguyên bản.
+
+> **Ghi chú (Phase 8.11):** CCCD chụp bằng điện thoại thường bị nghiêng và ảnh chụp
+> dọc trong khi bố cục thẻ là ngang. Bước phân loại hướng là bắt buộc, không phải tùy chọn.
 
 ### 3.4. Ngưỡng tin cậy
 
@@ -503,8 +544,8 @@ Base URL: `https://{host}/api/v1`
     "dateOfBirth":  { "value": "1995-04-20",  "confidence": 0.93, "source": "front", "isValid": true },
     "gender":       { "value": "Male",        "confidence": 0.9,  "source": "front", "isValid": true },
     "address":      { "value": "12 Lê Lợi…", "confidence": 0.78, "source": "front", "isValid": true },
-    "issueDate":    { "value": "2021-05-10",  "confidence": 0.93, "source": "front", "isValid": true },
-    "expiryDate":   { "value": "2036-04-20",  "confidence": 0.96, "source": "back",  "isValid": true },
+    "issueDate":    { "value": "2021-05-10",  "confidence": 0.93, "source": "back",  "isValid": true },
+    "expiryDate":   { "value": "2036-04-20",  "confidence": 0.96, "source": "front", "isValid": true },
     "authorityNo":  { "value": null,          "confidence": 0.71, "source": "back",  "isValid": false }
   },
   "warnings": ["Không đọc rõ 'Địa chỉ' — độ tin cậy 78%, vui lòng kiểm tra."],

@@ -50,17 +50,39 @@ public class OcrFieldExtractorTests
         var raw = new Dictionary<string, string>
         {
             ["front"] = "HỌ VÀ TÊN: NGUYỄN VĂN A",
-            ["back"] = "CÓ GIÁ TRỊ ĐẾN NGÀY: 20/04/2036\nSỐ HIỆU: 012345678"
+            ["back"] = "NGÀY, THÁNG, NĂM: 10/05/2021\nSỐ HIỆU: 012345678"
+        };
+
+        var result = OcrFieldExtractor.Extract(raw);
+
+        // On the real CCCD the issue date ("Ngày, tháng, năm") is printed on the back.
+        result.Should().ContainKey("issueDate");
+        result["issueDate"].Value.Should().Be("10/05/2021");
+        result["issueDate"].Source.Should().Be(OcrFieldSource.Back);
+
+        result.Should().ContainKey("authorityNo");
+        result["authorityNo"].Value.Should().Be("012345678");
+    }
+
+    [Fact]
+    public void Extract_Finds_The_Expiry_Date_On_The_Front_Side()
+    {
+        // On the real 12-digit CCCD the expiry date ("CÓ GIÁ TRỊ ĐẾN") is printed on
+        // the FRONT, in the bottom-left corner - not on the back.
+        var raw = new Dictionary<string, string>
+        {
+            ["front"] = "CÓ GIÁ TRỊ ĐẾN: 20/04/2036",
+            ["back"] = "NGÀY, THÁNG, NĂM: 10/05/2021"
         };
 
         var result = OcrFieldExtractor.Extract(raw);
 
         result.Should().ContainKey("expiryDate");
         result["expiryDate"].Value.Should().Be("20/04/2036");
-        result["expiryDate"].Source.Should().Be(OcrFieldSource.Back);
+        result["expiryDate"].Source.Should().Be(OcrFieldSource.Front);
 
-        result.Should().ContainKey("authorityNo");
-        result["authorityNo"].Value.Should().Be("012345678");
+        result.Should().ContainKey("issueDate");
+        result["issueDate"].Source.Should().Be(OcrFieldSource.Back);
     }
 
     [Fact]
@@ -162,6 +184,104 @@ public class OcrFieldExtractorTests
 
         result.Should().ContainKey("fullName");
         result.Should().ContainKey("dateOfBirth");
+    }
+
+    [Fact]
+    public void Extract_Uses_The_Fields_Of_The_Engine()
+    {
+        // The engine pairs the labels with their values using the geometry of the
+        // card - on a real photo that is the only way to get the right value, so its
+        // result wins over the plain text scan.
+        var engineFields = new Dictionary<string, PaddleOcrField>
+        {
+            ["documentNumber"] = new() { Value = "048203001078", Source = "front", Confidence = 0.9 },
+            ["fullName"] = new() { Value = "NGUYN MINH KHI", Source = "front", Confidence = 0.9 },
+            ["dateOfBirth"] = new() { Value = "05/10/2003", Source = "front", Confidence = 0.9 },
+            ["gender"] = new() { Value = "Nam", Source = "front", Confidence = 0.9 }
+        };
+
+        var raw = new Dictionary<string, string>
+        {
+            ["front"] = "SOCIALIST REPUBLIC OF VIET NAM\nHo và tên / Full name:\nNGUYN MINH KHI"
+        };
+
+        var result = OcrFieldExtractor.Extract(engineFields, raw);
+
+        result.Should().ContainKey("documentNumber");
+        result["documentNumber"].Value.Should().Be("048203001078");
+        result["documentNumber"].Source.Should().Be(OcrFieldSource.Front);
+
+        result.Should().ContainKey("fullName");
+        result["fullName"].Value.Should().Be("NGUYN MINH KHI");
+
+        result.Should().ContainKey("dateOfBirth");
+        result["dateOfBirth"].Value.Should().Be("05/10/2003");
+
+        result.Should().ContainKey("gender");
+        result["gender"].Value.Should().Be("Nam");
+    }
+
+    [Fact]
+    public void Extract_Falls_Back_To_The_Text_For_Fields_The_Engine_Missed()
+    {
+        var engineFields = new Dictionary<string, PaddleOcrField>
+        {
+            ["fullName"] = new() { Value = "NGUYN MINH KHI", Source = "front", Confidence = 0.9 }
+        };
+
+        var raw = new Dictionary<string, string>
+        {
+            ["front"] = "HỌ VÀ TÊN: NGUYỄN VĂN A\nNGÀY SINH: 20/04/1995"
+        };
+
+        var result = OcrFieldExtractor.Extract(engineFields, raw);
+
+        // The engine found the name - it wins.
+        result["fullName"].Value.Should().Be("NGUYN MINH KHI");
+
+        // The engine did not find the date of birth - the text scan does.
+        result.Should().ContainKey("dateOfBirth");
+        result["dateOfBirth"].Value.Should().Be("20/04/1995");
+    }
+
+    [Fact]
+    public void Extract_Ignores_Unknown_Engine_Fields()
+    {
+        var engineFields = new Dictionary<string, PaddleOcrField>
+        {
+            ["somethingElse"] = new() { Value = "noise", Source = "front", Confidence = 0.9 }
+        };
+
+        var result = OcrFieldExtractor.Extract(engineFields, null);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Extract_Skips_Engine_Fields_Without_A_Value()
+    {
+        var engineFields = new Dictionary<string, PaddleOcrField>
+        {
+            ["documentNumber"] = new() { Value = null, Source = "front", Confidence = 0.0 },
+            ["fullName"] = new() { Value = "   ", Source = "front", Confidence = 0.0 }
+        };
+
+        var result = OcrFieldExtractor.Extract(engineFields, null);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Extract_Reads_The_Source_Of_The_Engine_Field()
+    {
+        var engineFields = new Dictionary<string, PaddleOcrField>
+        {
+            ["expiryDate"] = new() { Value = "05/10/2028", Source = "back", Confidence = 0.9 }
+        };
+
+        var result = OcrFieldExtractor.Extract(engineFields, null);
+
+        result["expiryDate"].Source.Should().Be(OcrFieldSource.Back);
     }
 
     [Theory]

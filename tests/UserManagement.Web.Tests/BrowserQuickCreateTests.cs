@@ -147,6 +147,30 @@ public class BrowserQuickCreateTests : IAsyncLifetime
         (await db.Users.CountAsync()).Should().Be(0, "the OCR preview must not create a user.");
     }
 
+    /// <summary>
+    /// Regression test: the OCR field is named "issueDate" (docs/OCR-Cloudinary-Spec.md
+    /// §3.3) while the form field is named "IssuedDate". When the two got mixed up, the
+    /// "Ngày cấp" input stayed empty even though the API had read the date.
+    /// </summary>
+    [Fact]
+    public async Task Ocr_Preview_Fills_The_Issued_Date()
+    {
+        await GoToAsync("/Users/QuickCreate");
+        await _page.Locator("[data-mode-option='ocr']").ClickAsync();
+
+        var front = NewImage("front.jpg");
+        var back = NewImage("back.jpg", r: 20, g: 120, b: 200);
+        await _page.Locator("input[data-ocr-image='front']").SetInputFilesAsync(front);
+        await _page.Locator("input[data-ocr-image='back']").SetInputFilesAsync(back);
+        await _page.Locator("[data-ocr-preview-btn]").ClickAsync();
+
+        await Assertions.Expect(_page.Locator("[data-ocr-panel]")).ToBeVisibleAsync(new() { Timeout = 15000 });
+
+        // The fake engine reports the issue date as "10/05/2021" (issueDate).
+        await Assertions.Expect(_page.Locator("#IssuedDate")).ToHaveValueAsync("2021-05-10", new() { Timeout = 15000 });
+        await Assertions.Expect(_page.Locator("#ExpiryDate")).ToHaveValueAsync("2036-04-20", new() { Timeout = 15000 });
+    }
+
     [Fact]
     public async Task QuickCreate_Ocr_Creates_The_User_Together_With_The_Document()
     {
@@ -198,5 +222,133 @@ public class BrowserQuickCreateTests : IAsyncLifetime
         await _page.Locator("input[data-ocr-image='front']").SetInputFilesAsync(front);
 
         await Assertions.Expect(_page.Locator("[data-ocr-preview-btn]")).ToBeEnabledAsync();
+    }
+
+    // ---------- the document step fails after the user was created ----------
+
+    /// <summary>
+    /// Regression test for the bug the user reported: the Quick Create OCR branch
+    /// created the user, the document save failed (the image-storage backend was
+    /// not configured, so the API answered HTTP 500), and the flow dropped the user
+    /// on the details page where they had to hunt for "Thêm giấy tờ" and open
+    /// /Users/{id}/Documents/Create from scratch.
+    ///
+    /// The user must be created exactly ONCE and the flow must continue on the
+    /// document form, pre-filled with the values that were already entered.
+    /// </summary>
+    [Fact]
+    public async Task QuickCreate_Ocr_When_The_Document_Fails_Continues_On_The_Document_Form()
+    {
+        // A document number that is already taken makes the API reject the document
+        // step with HTTP 409 - the same code path a broken storage backend produces.
+        const string takenDocumentNumber = "079095001234";
+
+        var blockerEmail = $"qc-blocker-{Guid.NewGuid():N}@example.com";
+        Guid blockerUserId;
+
+        using (var scope = _harness.ApiServices.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var blocker = new User
+            {
+                Id = Guid.NewGuid(),
+                FullName = "Người Dùng Chặn",
+                Email = blockerEmail,
+                PhoneNumber = "0900000001",
+                CreatedAt = DateTime.UtcNow
+            };
+            db.Users.Add(blocker);
+            db.IdentityDocuments.Add(new IdentityDocument
+            {
+                Id = Guid.NewGuid(),
+                UserId = blocker.Id,
+                DocumentType = DocumentType.CCCD,
+                DocumentNumber = takenDocumentNumber,
+                FrontImagePublicId = "test/front.jpg",
+                CreatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+            blockerUserId = blocker.Id;
+        }
+
+        var email = $"qc-ocr-fail-{Guid.NewGuid():N}@example.com";
+
+        await GoToAsync("/Users/QuickCreate");
+        await _page.Locator("[data-mode-option='ocr']").ClickAsync();
+
+        var front = NewImage("front.jpg");
+        var back = NewImage("back.jpg", r: 20, g: 120, b: 200);
+        await _page.Locator("input[data-ocr-image='front']").SetInputFilesAsync(front);
+        await _page.Locator("input[data-ocr-image='back']").SetInputFilesAsync(back);
+        await _page.Locator("[data-ocr-preview-btn]").ClickAsync();
+        await Assertions.Expect(_page.Locator("[data-ocr-panel]")).ToBeVisibleAsync(new() { Timeout = 15000 });
+
+        await _page.Locator("#Email").FillAsync(email);
+        await _page.Locator("#PhoneNumber").FillAsync("0912345699");
+        // Use the number that is already taken -> the document step must fail.
+        await _page.Locator("#DocumentNumber").FillAsync(takenDocumentNumber);
+
+        await _page.Locator("[data-quick-submit]").ClickAsync();
+
+        // The flow must land on the document form, NOT on the details page.
+        await _page.WaitForURLAsync(
+            url => url.Contains("/Documents/Create"),
+            new PageWaitForURLOptions { Timeout = 20000 });
+        await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // The user was created exactly once - the document failure must not create it again.
+        using (var scope = _harness.ApiServices.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var created = await db.Users.Include(u => u.IdentityDocuments)
+                .Where(u => u.Email == email)
+                .ToListAsync();
+            created.Should().HaveCount(1, "the user must never be created twice.");
+            created[0].IdentityDocuments.Should().BeEmpty("the document step failed.");
+            created[0].Id.Should().NotBe(blockerUserId);
+        }
+
+        // The message must say the user was created but the document was not saved.
+        await Assertions.Expect(_page.Locator(".alert-danger")).ToContainTextAsync(
+            "Người dùng đã được tạo nhưng giấy tờ chưa được lưu");
+
+        // The values the user already typed are carried over - nothing to retype.
+        await Assertions.Expect(_page.Locator("#DocumentNumber")).ToHaveValueAsync(takenDocumentNumber);
+    }
+
+    /// <summary>
+    /// The document form must accept the pre-fill query parameters so the failed
+    /// Quick Create can hand over the values the user already entered.
+    /// </summary>
+    [Fact]
+    public async Task Document_Create_Form_Prefills_The_Values_From_The_Query_String()
+    {
+        var email = $"qc-prefill-{Guid.NewGuid():N}@example.com";
+
+        Guid userId;
+        using (var scope = _harness.ApiServices.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var user = new User
+            {
+                Id = Guid.NewGuid(),
+                FullName = "Người Dùng Prefill",
+                Email = email,
+                PhoneNumber = "0900000002",
+                CreatedAt = DateTime.UtcNow
+            };
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+            userId = user.Id;
+        }
+
+        await GoToAsync(
+            $"/Users/{userId}/Documents/Create"
+            + "?documentType=CCCD&documentNumber=001234567890&issuedDate=2021-05-10&expiryDate=2036-04-20");
+
+        await Assertions.Expect(_page.Locator("#DocumentNumber")).ToHaveValueAsync("001234567890");
+        await Assertions.Expect(_page.Locator("#IssuedDate")).ToHaveValueAsync("2021-05-10");
+        await Assertions.Expect(_page.Locator("#ExpiryDate")).ToHaveValueAsync("2036-04-20");
+        await Assertions.Expect(_page.Locator("select#DocumentType")).ToHaveValueAsync("CCCD");
     }
 }

@@ -12,6 +12,17 @@ namespace UserManagement.Api.Ocr;
 public static partial class OcrFieldExtractor
 {
     /// <summary>
+    /// The business fields the engine may return. The Python service already pairs the
+    /// labels with their values (it knows the geometry of the card), so its result is
+    /// used directly.
+    /// </summary>
+    private static readonly HashSet<string> KnownFields = new(StringComparer.Ordinal)
+    {
+        "documentNumber", "fullName", "dateOfBirth", "gender",
+        "address", "issueDate", "expiryDate", "authorityNo"
+    };
+
+    /// <summary>
     /// Label aliases per business field. Matching ignores case, diacritics and
     /// punctuation differences.
     /// </summary>
@@ -22,12 +33,26 @@ public static partial class OcrFieldExtractor
         ["dateOfBirth"] = ["ngay sinh"],
         ["gender"] = ["gioi tinh"],
         ["address"] = ["dia chi thuong tru", "dia chi"],
-        ["issueDate"] = ["ngay cap"],
-        ["expiryDate"] = ["co gia tri den ngay", "co gia tri den", "gia tri den ngay", "ngay het han"],
+        // On the real CCCD the issue date is printed on the BACK as
+        // "Ngày, tháng, năm / Date, month, year" - not as "Ngày cấp".
+        ["issueDate"] = ["ngay cap", "ngay thang nam"],
+        // The expiry date is printed on the FRONT as "Có giá trị đến / Date of expiry".
+        ["expiryDate"] = ["co gia tri den ngay", "co gia tri den", "gia tri den ngay", "gia tri den", "ngay het han", "date of expiry"],
         ["authorityNo"] = ["so hieu", "co quan cap"]
     };
 
-    /// <summary>Which side of the document each field lives on.</summary>
+    /// <summary>
+    /// Which side of the document each field lives on.
+    ///
+    /// These follow the REAL 12-digit CCCD, not the older card layout:
+    /// - the expiry date ("Có giá trị đến / Date of expiry") is printed on the
+    ///   FRONT, in the bottom-left corner;
+    /// - the issue date ("Ngày, tháng, năm / Date, month, year") is printed on the
+    ///   BACK.
+    ///
+    /// This is only the fallback used when the OCR engine did not resolve the field
+    /// itself - the engine reports the side it actually read the value from.
+    /// </summary>
     private static readonly Dictionary<string, OcrFieldSource> FieldSources = new(StringComparer.Ordinal)
     {
         ["documentNumber"] = OcrFieldSource.Front,
@@ -35,13 +60,68 @@ public static partial class OcrFieldExtractor
         ["dateOfBirth"] = OcrFieldSource.Front,
         ["gender"] = OcrFieldSource.Front,
         ["address"] = OcrFieldSource.Front,
-        ["issueDate"] = OcrFieldSource.Front,
-        ["expiryDate"] = OcrFieldSource.Back,
+        ["issueDate"] = OcrFieldSource.Back,
+        ["expiryDate"] = OcrFieldSource.Front,
         ["authorityNo"] = OcrFieldSource.Back
     };
 
     [GeneratedRegex(@"[^\p{L}\p{N}]+")]
     private static partial Regex NonAlphanumericRegex();
+
+    /// <summary>
+    /// Converts the fields the engine already parsed into the raw (un-normalized) shape
+    /// the normalizer expects.
+    ///
+    /// The Python service pairs the labels with their values using the GEOMETRY of the
+    /// card (bounding boxes, column alignment, the reading order of the photo). That is
+    /// the only way to read a real photo, where the OCR returns the lines in an order
+    /// that does not follow the card - a plain text scan would pick the wrong value.
+    ///
+    /// The engine result is therefore authoritative; the text-based
+    /// <see cref="Extract(IReadOnlyDictionary{string, string}?)"/> is only a fallback for
+    /// the fields the engine did not find.
+    /// </summary>
+    /// <param name="engineFields">The <c>fields</c> object of the engine response.</param>
+    /// <param name="rawText">Raw text per side, used as the fallback.</param>
+    public static Dictionary<string, ExtractedValue> Extract(
+        IReadOnlyDictionary<string, PaddleOcrField>? engineFields,
+        IReadOnlyDictionary<string, string>? rawText)
+    {
+        var result = new Dictionary<string, ExtractedValue>(StringComparer.Ordinal);
+
+        if (engineFields is not null)
+        {
+            foreach (var (key, field) in engineFields)
+            {
+                if (!KnownFields.Contains(key))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(field.Value))
+                {
+                    continue;
+                }
+
+                var source = string.Equals(field.Source, "back", StringComparison.OrdinalIgnoreCase)
+                    ? OcrFieldSource.Back
+                    : OcrFieldSource.Front;
+
+                result[key] = new ExtractedValue(field.Value.Trim(), source);
+            }
+        }
+
+        // Fall back to the text scan for the fields the engine did not resolve.
+        foreach (var (field, value) in Extract(rawText))
+        {
+            if (!result.ContainsKey(field))
+            {
+                result[field] = value;
+            }
+        }
+
+        return result;
+    }
 
     /// <summary>
     /// Extracts the raw (un-normalized) value of every known field from the OCR text.

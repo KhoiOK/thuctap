@@ -10,6 +10,20 @@ using UserManagement.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ---------------------------------------------------------------------------
+// Local development secrets: "appsettings.Development.local.json".
+//
+// The default host builder only loads "appsettings.json" and
+// "appsettings.{Environment}.json". A file named "*.local.json" is never picked
+// up, so the Cloudinary credentials in it were silently ignored and every
+// identity-document upload failed with "Cloudinary chưa được cấu hình" (HTTP
+// 500). The file is git-ignored and must stay untracked.
+// ---------------------------------------------------------------------------
+builder.Configuration.AddJsonFile(
+    $"appsettings.{builder.Environment.EnvironmentName}.local.json",
+    optional: true,
+    reloadOnChange: true);
+
 // =================== Services ===================
 
 builder.Services.AddControllers(options =>

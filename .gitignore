@@ -36,6 +36,8 @@ coverage*.json
 # ===== Logs =====
 *.log
 logs/
+logs-*.out
+logs-*.err
 
 # ===== OS =====
 .DS_Store
@@ -45,3 +47,20 @@ desktop.ini
 # ===== PDF build artifacts (tools/build_srs_pdf.py) =====
 docs/*-v2.0-ORIGINAL.pdf
 tools/__pycache__/
+
+# ===== Python (services/paddleocr microservice) =====
+__pycache__/
+*.py[cod]
+services/paddleocr/.venv/
+
+# ===== Anh CCCD THAT (du lieu ca nhan) — KHONG BAO GIỜ COMMIT =====
+# Ban sao cua the CCCD that cua nguoi thu nghiem, dung de kiem chung OCR.
+services/paddleocr/real/
+services/paddleocr/back.jpg
+services/paddleocr/front.jpg
+ocr-real.json
+
+# ===== OCR UI verification (tools/OcrUiVerify) =====
+tools/OcrUiVerify/bin/
+tools/OcrUiVerify/obj/
+ocr-ui-*.png

@@ -29,9 +29,14 @@
     const HIGH_CONFIDENCE = 0.85;
 
     // Trường form <- trường OCR.
+    //
+    // Tên khóa của trường OCR phải khớp với những gì API trả về (xem
+    // docs/OCR-Cloudinary-Spec.md §3.3): "issueDate" - KHÔNG phải "issuedDate".
+    // "issuedDate" là tên của trường form (input IssuedDate), không phải tên
+    // trường OCR. Lệch tên ở đây khiến "Ngày cấp" không được điền tự động.
     const FIELD_MAP = {
         documentNumber: 'DocumentNumber',
-        issuedDate: 'IssuedDate',
+        issueDate: 'IssuedDate',
         expiryDate: 'ExpiryDate'
     };
 
@@ -141,6 +146,7 @@
             gender: 'Giới tính',
             address: 'Địa chỉ',
             issuedDate: 'Ngày cấp',
+            issueDate: 'Ngày cấp',
             expiryDate: 'Ngày hết hạn',
             authorityNo: 'Số hiệu'
         };

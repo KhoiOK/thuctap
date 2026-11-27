@@ -86,10 +86,15 @@ public class OcrScanViewModel
 /// <summary>
 /// The form fields that the OCR engine can fill in.
 /// </summary>
+/// <remarks>
+/// The constant names are the OCR field names the API returns
+/// (see <c>docs/OCR-Cloudinary-Spec.md</c> §3.3) - they are NOT the form field
+/// names. "issueDate" is the OCR name; "IssuedDate" is the form field.
+/// </remarks>
 public static class OcrFieldNames
 {
     public const string DocumentNumber = "documentNumber";
-    public const string IssuedDate = "issuedDate";
+    public const string IssueDate = "issueDate";
     public const string ExpiryDate = "expiryDate";
 
     /// <summary>Display names used in the result panel.</summary>
@@ -100,7 +105,7 @@ public static class OcrFieldNames
         ["dateOfBirth"] = "Ngày sinh",
         ["gender"] = "Giới tính",
         ["address"] = "Địa chỉ",
-        [IssuedDate] = "Ngày cấp",
+        [IssueDate] = "Ngày cấp",
         [ExpiryDate] = "Ngày hết hạn",
         ["authorityNo"] = "Số hiệu"
     };

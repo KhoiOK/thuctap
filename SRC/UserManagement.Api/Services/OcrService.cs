@@ -153,7 +153,7 @@ public class OcrService : IOcrService
                 v => v.Value.Confidence,
                 StringComparer.Ordinal) ?? new Dictionary<string, double>();
 
-            var extracted = OcrFieldExtractor.Extract(response.RawText);
+            var extracted = OcrFieldExtractor.Extract(response.Fields, response.RawText);
             var fields = _normalizer.Normalize(extracted, documentType, confidences);
 
             // ---- 5. Persist the scan record ----
@@ -258,7 +258,7 @@ public class OcrService : IOcrService
             v => v.Value.Confidence,
             StringComparer.Ordinal) ?? new Dictionary<string, double>();
 
-        var extracted = OcrFieldExtractor.Extract(response.RawText);
+        var extracted = OcrFieldExtractor.Extract(response.Fields, response.RawText);
         var fields = _normalizer.Normalize(extracted, documentType, confidences);
 
         var processingTimeMs = (int)(_time.GetUtcNow().UtcDateTime - startedAt).TotalMilliseconds;
@@ -422,7 +422,15 @@ public class OcrService : IOcrService
         {
             // The database write failed - remove the assets we just moved so we do not
             // leave orphaned files behind (mirrors the manual create flow).
-            await _cloudinary.DeleteAsync(new[] { frontPublicId, backPublicId }, CancellationToken.None);
+            // The back image is optional, so only the ids that exist are deleted.
+            var publicIds = new[] { frontPublicId, backPublicId }
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id!)
+                .ToArray();
+            if (publicIds.Length > 0)
+            {
+                await _cloudinary.DeleteAsync(publicIds, CancellationToken.None);
+            }
             throw;
         }
 

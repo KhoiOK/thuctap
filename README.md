@@ -66,6 +66,14 @@ dotnet run
 
 API lắng nghe tại `https://localhost:5001`. Swagger UI: `https://localhost:5001/swagger`.
 
+> **Lỗi `address already in use`:** nếu một tiến trình khác đang giữ port `5051`
+> (hoặc `5052` cho Web), `dotnet run` sẽ không khởi động được. Kiểm tra và dừng:
+>
+> ```powershell
+> Get-NetTCPConnection -State Listen -LocalPort 5051 | Select-Object OwningProcess
+> Get-Process UserManagement.Api -ErrorAction SilentlyContinue | Stop-Process -Force
+> ```
+
 ## Cách chạy Frontend
 
 Trong lần đầu, build Tailwind CSS:
@@ -116,7 +124,7 @@ dotnet test
 
 ## Tổng kết
 
-- **227/227 tests passed** (187 API + 40 Web = 88 unit/viewmodel + 78 integration/E2E + 1 live Cloudinary smoke test).
+- **468/468 tests passed** (229 API + 110 Web + 12 test_main.py + 17 test_real_cccd.py).
 - `dotnet build -c Release`: 0 errors.
 - E2E tests chạy qua toàn bộ stack thật: Web MVC + Backend API + SQL Server 2022 + Cloudinary (in-memory double) + PaddleOCR (fake client).
 - Tài liệu chi tiết triển khai và quyết định kỹ thuật: xem `NOTES.md`.
